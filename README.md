@@ -9,7 +9,7 @@ contract can be argued about with something running.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                 # 182 tests
+python -m pytest -q                 # 214 tests
 python demo.py                      # every synthetic scenario through the full flow, as a table
 python -m fortguard.app --dev       # serve on 127.0.0.1:8080 with the portal and phone test page
 python demo.py --url http://127.0.0.1:8080
@@ -32,6 +32,22 @@ bank backend
   |  POST /v1/risk/evaluate (X-API-Key)  ---->  score, level, action, reason codes
   |  POST /v1/devices/<id>/revoke (X-API-Key) ->  stop trusting a device
 ```
+
+**New here? Read START_HERE.md first.** It explains the builds, the cloud test server and what to test.
+
+## Back office
+
+`/portal` is the back office: sign in, dashboard, case queue (step-up and block decisions open cases
+automatically), case detail with reasons, notes, status, assignee and history, devices with revoke, rule
+weights and decision bands editable live, users with roles (viewer, analyst, admin) and an audit log of every
+change. Data is kept in SQLite (`FORTGUARD_DATA_DIR`). The first user is `admin`; its password comes from
+`FORTGUARD_ADMIN_PASSWORD`, or is `fortguard-admin-dev` in dev mode, or is printed at start.
+
+## iOS SDK and demo app
+
+`ios/FortGuardSDK` is a Swift package (Secure Enclave signing, touch, motion, call, screen-capture and jailbreak
+checks); `ios/DemoApp` is the SwiftUI demo, generated into an Xcode project by XcodeGen. Both are built and
+tested on GitHub's Mac machines by `.github/workflows/ios.yml`.
 
 ## Android SDK and demo APK
 
