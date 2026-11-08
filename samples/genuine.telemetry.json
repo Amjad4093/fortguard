@@ -1,0 +1,155 @@
+{
+  "app_id": "com.example.mobilebank",
+  "consent": {
+    "behavioral": true
+  },
+  "device_guid": "dev_pho5sdf6rkwe",
+  "environment": {
+    "active_call": false,
+    "active_remote_software": false,
+    "has_hooking_framework": false,
+    "is_emulator": false,
+    "is_rooted": false,
+    "mock_location": false,
+    "os": "Android",
+    "os_version": "15.0",
+    "screen_sharing": false,
+    "vpn": false
+  },
+  "key_events": [
+    {
+      "event_type": "DOWN",
+      "field": "beneficiary_account",
+      "ts": 1799999915801
+    },
+    {
+      "event_type": "UP",
+      "field": "beneficiary_account",
+      "ts": 1799999915899
+    },
+    {
+      "event_type": "DOWN",
+      "field": "beneficiary_account",
+      "ts": 1799999916111
+    },
+    {
+      "event_type": "UP",
+      "field": "beneficiary_account",
+      "ts": 1799999916174
+    },
+    {
+      "event_type": "DOWN",
+      "field": "beneficiary_account",
+      "ts": 1799999916289
+    },
+    {
+      "event_type": "UP",
+      "field": "beneficiary_account",
+      "ts": 1799999916387
+    }
+  ],
+  "nonce": "n_k4pje313ak2t0979",
+  "sensor_data": {
+    "accelerometer": [
+      {
+        "ts": 1799999910000,
+        "x": -0.028631900668575093,
+        "y": 9.780309065974667,
+        "z": 0.17940902221959348
+      },
+      {
+        "ts": 1799999910050,
+        "x": 0.05328647069968519,
+        "y": 9.725103073712134,
+        "z": 0.3002500383874176
+      },
+      {
+        "ts": 1799999910100,
+        "x": 0.08495866512694185,
+        "y": 9.833650853184778,
+        "z": 0.1767267737458576
+      }
+    ],
+    "gyroscope": [
+      {
+        "ts": 1799999910000,
+        "x": 0.009026730295329233,
+        "y": 0.011021240305723354,
+        "z": -0.00553016190188725
+      },
+      {
+        "ts": 1799999910050,
+        "x": 0.033861482289217475,
+        "y": 0.006729596687598132,
+        "z": -0.005078459223895319
+      },
+      {
+        "ts": 1799999910100,
+        "x": 0.00044930612434293613,
+        "y": -0.030096045783793275,
+        "z": 0.003781971095538987
+      }
+    ]
+  },
+  "seq": 0,
+  "session_id": "sess_jwnjlqxq9o98",
+  "signature": "MEQCIE0g0ZtqyWyI7dQ3yJkiJ8hyYZ99tvj9IxEj7s1e8TOcAiAQMExPXl_K5p28TRGBSGGQygiSjZM6eDibPLiSgdS6CQ",
+  "timestamp_ms": 1799999940000,
+  "touch_events": [
+    {
+      "event_type": "DOWN",
+      "pressure": 0.6738887660750635,
+      "size": 0.2461919995463157,
+      "timestamp_ms": 1799999910000,
+      "x": 281.1389338760225,
+      "y": 1164.4368275821657
+    },
+    {
+      "event_type": "MOVE",
+      "pressure": 0.564323568250973,
+      "size": 0.42923885594985256,
+      "timestamp_ms": 1799999910023,
+      "x": 287.7962618987417,
+      "y": 1139.189094207666
+    },
+    {
+      "event_type": "MOVE",
+      "pressure": 0.7757476820854396,
+      "size": 0.20558959190183723,
+      "timestamp_ms": 1799999910032,
+      "x": 301.96246428946614,
+      "y": 1114.3517502847612
+    },
+    {
+      "event_type": "MOVE",
+      "pressure": 0.3989950293753567,
+      "size": 0.279000454795718,
+      "timestamp_ms": 1799999910062,
+      "x": 306.7159561171707,
+      "y": 1088.9999647909015
+    },
+    {
+      "event_type": "MOVE",
+      "pressure": 0.3479917313994987,
+      "size": 0.26028368605433083,
+      "timestamp_ms": 1799999910057,
+      "x": 304.2375538799188,
+      "y": 1063.252927905973
+    },
+    {
+      "event_type": "MOVE",
+      "pressure": 0.7980365626804213,
+      "size": 0.40334439006512834,
+      "timestamp_ms": 1799999910060,
+      "x": 313.21513159187487,
+      "y": 1038.1320052824408
+    }
+  ],
+  "ui_events": [
+    {
+      "event_type": "FOCUS",
+      "field": "beneficiary_account",
+      "ts": 1799999915401
+    }
+  ]
+}

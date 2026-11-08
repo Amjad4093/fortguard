@@ -1,0 +1,19 @@
+{
+  "action_recommended": "PROCEED",
+  "degraded": false,
+  "latency_ms": 0.0,
+  "model_version": "rules-0.2.0",
+  "reason_codes": [],
+  "risk_level": "ALLOW",
+  "risk_score": 0,
+  "score_breakdown": [],
+  "scoring_mode": "RULES_ONLY",
+  "session_id": "sess_jwnjlqxq9o98",
+  "signals_used": "ENVIRONMENT_AND_BEHAVIOR",
+  "threat_details": {
+    "bot_probability": 0.0,
+    "coercion_scam_probability": 0.0,
+    "rat_detected": false,
+    "user_biometric_match_score": null
+  }
+}

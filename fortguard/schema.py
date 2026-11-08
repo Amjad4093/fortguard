@@ -1,0 +1,244 @@
+"""Strict validation of SDK telemetry and risk requests.
+
+Privacy rule (BRD FR-SDK-001, NFR-003): no typed characters ever reach the server. Key and UI events
+may carry only an event type, a timestamp and a field name from a fixed list. Any other key, and any
+field name outside the list, is refused with code `forbidden_field`, so free text cannot be smuggled
+in.
+"""
+
+import math
+import re
+
+from . import config
+
+ID_RE = re.compile(r"^[A-Za-z0-9_\-]{8,64}$")
+VERSION_RE = re.compile(r"^[0-9A-Za-z.\-_ ]{1,32}$")
+CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+
+TOP_ALLOWED = {
+    "session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "seq", "consent",
+    "environment", "touch_events", "key_events", "ui_events", "sensor_data", "signature",
+}
+TOP_REQUIRED = ("session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "environment")
+
+ENV_BOOLS = (
+    "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software",
+    "screen_sharing", "active_call", "vpn", "mock_location",
+)
+ENV_ALLOWED = set(ENV_BOOLS) | {"os", "os_version"}
+
+TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
+KEY_TYPES = {"DOWN", "UP"}
+UI_TYPES = {"FOCUS", "PASTE", "SUBMIT"}
+FIELDS = {"username", "password", "otp", "beneficiary_account", "amount", "other"}
+
+TOUCH_KEYS = {"event_type", "x", "y", "pressure", "size", "timestamp_ms"}
+KEY_KEYS = {"event_type", "ts", "field"}
+UI_KEYS = {"event_type", "field", "ts"}
+SENSOR_KEYS = {"x", "y", "z", "ts"}
+
+
+class ValidationFailure(Exception):
+    def __init__(self, status, code, message):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+
+
+def _fail(code, message, status=400):
+    raise ValidationFailure(status, code, message)
+
+
+def _num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _need_num(value, name, low=None, high=None):
+    if not _num(value):
+        _fail("invalid_request", f"{name} must be a number")
+    if low is not None and value < low:
+        _fail("invalid_request", f"{name} is out of range")
+    if high is not None and value > high:
+        _fail("invalid_request", f"{name} is out of range")
+
+
+def _need_id(value, name):
+    if not isinstance(value, str) or not ID_RE.match(value):
+        _fail("invalid_request", f"{name} must be 8 to 64 letters, digits, underscore or dash")
+
+
+def _need_list(payload, name, limit):
+    items = payload.get(name, [])
+    if not isinstance(items, list):
+        _fail("invalid_request", f"{name} must be a list")
+    if len(items) > limit:
+        _fail("batch_too_large", f"{name} has more than {limit} items", status=413)
+    return items
+
+
+def validate_telemetry(p):
+    """Raise ValidationFailure on the first problem. Return the payload when it is valid."""
+    if not isinstance(p, dict):
+        _fail("invalid_request", "body must be a JSON object")
+    unknown = set(p) - TOP_ALLOWED
+    if unknown:
+        _fail("unknown_field", f"unknown fields: {sorted(unknown)}")
+    for name in TOP_REQUIRED:
+        if name not in p:
+            _fail("invalid_request", f"missing field {name}")
+
+    _need_id(p["session_id"], "session_id")
+    _need_id(p["device_guid"], "device_guid")
+    _need_id(p["nonce"], "nonce")
+    if not isinstance(p["app_id"], str) or not 1 <= len(p["app_id"]) <= 128:
+        _fail("invalid_request", "app_id must be a string of 1 to 128 characters")
+    _need_num(p["timestamp_ms"], "timestamp_ms", low=1)
+    if "seq" in p:
+        _need_num(p["seq"], "seq", low=0)
+
+    consent = p.get("consent", {})
+    if not isinstance(consent, dict) or set(consent) - {"behavioral"}:
+        _fail("invalid_request", "consent may only contain 'behavioral'")
+    if "behavioral" in consent and not isinstance(consent["behavioral"], bool):
+        _fail("invalid_request", "consent.behavioral must be true or false")
+
+    env = p["environment"]
+    if not isinstance(env, dict):
+        _fail("invalid_request", "environment must be an object")
+    extra = set(env) - ENV_ALLOWED
+    if extra:
+        _fail("unknown_field", f"unknown environment fields: {sorted(extra)}")
+    for name in ENV_BOOLS:
+        if name in env and not isinstance(env[name], bool):
+            _fail("invalid_request", f"environment.{name} must be true or false")
+    if "os" in env and env["os"] not in config.PLATFORMS:
+        _fail("invalid_request", f"environment.os must be one of {list(config.PLATFORMS)}")
+    if "os_version" in env and (
+        not isinstance(env["os_version"], str) or not VERSION_RE.match(env["os_version"])
+    ):
+        _fail("invalid_request", "environment.os_version is not a valid version string")
+
+    for e in _need_list(p, "touch_events", config.MAX_TOUCH_PER_BATCH):
+        if not isinstance(e, dict) or set(e) - TOUCH_KEYS:
+            _fail("unknown_field", "touch events may only carry " + ", ".join(sorted(TOUCH_KEYS)))
+        if e.get("event_type") not in TOUCH_TYPES:
+            _fail("invalid_request", "touch event_type must be DOWN, MOVE or UP")
+        for name in ("x", "y", "timestamp_ms"):
+            if name not in e:
+                _fail("invalid_request", f"touch event is missing {name}")
+        _need_num(e["x"], "touch x", -10000, 10000)
+        _need_num(e["y"], "touch y", -10000, 10000)
+        _need_num(e["timestamp_ms"], "touch timestamp_ms", 1)
+        if "pressure" in e:
+            _need_num(e["pressure"], "touch pressure", 0, 2)
+        if "size" in e:
+            _need_num(e["size"], "touch size", 0, 1000)
+
+    for e in _need_list(p, "key_events", config.MAX_KEYS_PER_BATCH):
+        _check_event(e, "key", KEY_KEYS, KEY_TYPES)
+    for e in _need_list(p, "ui_events", config.MAX_UI_PER_BATCH):
+        _check_event(e, "ui", UI_KEYS, UI_TYPES)
+
+    sensors = p.get("sensor_data", {})
+    if not isinstance(sensors, dict) or set(sensors) - {"accelerometer", "gyroscope"}:
+        _fail("invalid_request", "sensor_data may only contain accelerometer and gyroscope")
+    for name in ("accelerometer", "gyroscope"):
+        samples = sensors.get(name, [])
+        if not isinstance(samples, list):
+            _fail("invalid_request", f"{name} must be a list")
+        if len(samples) > config.MAX_SENSOR_PER_BATCH:
+            _fail("batch_too_large", f"{name} has too many samples", status=413)
+        for s in samples:
+            if not isinstance(s, dict) or set(s) != SENSOR_KEYS:
+                _fail("invalid_request", f"{name} samples need exactly x, y, z and ts")
+            for axis in ("x", "y", "z"):
+                _need_num(s[axis], f"{name} {axis}", -1000, 1000)
+            _need_num(s["ts"], f"{name} ts", 1)
+    return p
+
+
+def _check_event(e, kind, allowed_keys, allowed_types):
+    if not isinstance(e, dict):
+        _fail("invalid_request", f"{kind} events must be objects")
+    if set(e) - allowed_keys:
+        _fail(
+            "forbidden_field",
+            f"{kind} events may only carry {sorted(allowed_keys)}; typed content is never accepted",
+            status=422,
+        )
+    if e.get("event_type") not in allowed_types:
+        _fail("invalid_request", f"{kind} event_type must be one of {sorted(allowed_types)}")
+    if "ts" not in e:
+        _fail("invalid_request", f"{kind} event is missing ts")
+    _need_num(e["ts"], f"{kind} ts", 1)
+    if "field" in e and e["field"] not in FIELDS:
+        _fail(
+            "forbidden_field",
+            f"{kind} event field must be one of {sorted(FIELDS)}",
+            status=422,
+        )
+
+
+ENROLL_ALLOWED = {"device_guid", "app_id", "platform", "public_key", "challenge", "attestation"}
+
+
+def validate_enroll(p):
+    if not isinstance(p, dict):
+        _fail("invalid_request", "body must be a JSON object")
+    unknown = set(p) - ENROLL_ALLOWED
+    if unknown:
+        _fail("unknown_field", f"unknown fields: {sorted(unknown)}")
+    for name in sorted(ENROLL_ALLOWED):
+        if name not in p:
+            _fail("invalid_request", f"missing field {name}")
+    _need_id(p["device_guid"], "device_guid")
+    if not isinstance(p["app_id"], str) or not 1 <= len(p["app_id"]) <= 128:
+        _fail("invalid_request", "app_id must be a string of 1 to 128 characters")
+    if p["platform"] not in config.PLATFORMS:
+        _fail("invalid_request", f"platform must be one of {list(config.PLATFORMS)}")
+    for name, limit in (("public_key", 256), ("challenge", 128), ("attestation", 8192)):
+        if not isinstance(p[name], str) or not 1 <= len(p[name]) <= limit:
+            _fail("invalid_request", f"{name} must be a string of 1 to {limit} characters")
+    return p
+
+
+EVAL_ALLOWED ={"session_id", "user_id", "event_type", "transaction_details", "request_id"}
+TX_ALLOWED = {"amount", "currency", "beneficiary_account", "is_new_beneficiary"}
+
+
+def validate_evaluate(p):
+    if not isinstance(p, dict):
+        _fail("invalid_request", "body must be a JSON object")
+    unknown = set(p) - EVAL_ALLOWED
+    if unknown:
+        _fail("unknown_field", f"unknown fields: {sorted(unknown)}")
+    for name in ("session_id", "user_id", "event_type"):
+        if name not in p:
+            _fail("invalid_request", f"missing field {name}")
+    _need_id(p["session_id"], "session_id")
+    if not isinstance(p["user_id"], str) or not 1 <= len(p["user_id"]) <= 64:
+        _fail("invalid_request", "user_id must be a string of 1 to 64 characters")
+    if p["event_type"] not in config.EVENT_TYPES:
+        _fail("invalid_request", f"event_type must be one of {list(config.EVENT_TYPES)}")
+    if "request_id" in p:
+        _need_id(p["request_id"], "request_id")
+
+    tx = p.get("transaction_details")
+    if p["event_type"] in config.SENSITIVE_EVENTS and tx is None:
+        _fail("invalid_request", "transaction_details is required for this event_type")
+    if tx is not None:
+        if not isinstance(tx, dict) or set(tx) - TX_ALLOWED:
+            _fail("unknown_field", f"transaction_details may only carry {sorted(TX_ALLOWED)}")
+        acct = tx.get("beneficiary_account")
+        if acct is not None and (not isinstance(acct, str) or not 8 <= len(acct) <= 40):
+            _fail("invalid_request", "beneficiary_account must be a string of 8 to 40 characters")
+        if p["event_type"] in config.SENSITIVE_EVENTS and acct is None:
+            _fail("invalid_request", "beneficiary_account is required for this event_type")
+        if p["event_type"] == "FUNDS_TRANSFER":
+            _need_num(tx.get("amount"), "amount", 0)
+            if not isinstance(tx.get("currency"), str) or not CURRENCY_RE.match(tx["currency"]):
+                _fail("invalid_request", "currency must be a 3-letter code")
+        if "is_new_beneficiary" in tx and not isinstance(tx["is_new_beneficiary"], bool):
+            _fail("invalid_request", "is_new_beneficiary must be true or false")
+    return p

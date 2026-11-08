@@ -1,0 +1,19 @@
+# Render Blueprint for the FortGuard TEST server (free plan).
+# Dashboard: New > Blueprint > pick this repository. Secrets are generated; read them under
+# the service's Environment tab.
+services:
+  - type: web
+    name: fortguard-test
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: FORTGUARD_DEV_MODE        # simulated attestation and the /phone test page: TEST ONLY
+        value: "1"
+      - key: FORTGUARD_API_KEY         # the bank-backend key used by the demo apps' "API key" field
+        generateValue: true
+      - key: FORTGUARD_ADMIN_PASSWORD  # first portal login: user "admin"
+        generateValue: true
+      - key: FORTGUARD_DATA_DIR
+        value: /tmp/fortguard

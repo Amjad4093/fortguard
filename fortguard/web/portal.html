@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FortGuard analyst portal</title>
+<style>
+:root {
+  --bg: #f4f5f8; --card: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --hover: #eef2fb;
+  --accent: #1f4fd8; --accent-ink: #ffffff;
+  --allow: #1d7a46; --allow-bg: #e3f4ea; --step: #8a5a00; --step-bg: #fdf0d2; --block: #b3261e; --block-bg: #fbe3e1;
+  --field: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --card: #181d26; --ink: #eaeef4; --muted: #9aa5b4; --line: #2a3240; --hover: #1f2735;
+    --accent: #6f93ff; --accent-ink: #0b1020;
+    --allow: #5fd08e; --allow-bg: #15301f; --step: #f0bd55; --step-bg: #35290d; --block: #ff8a80; --block-bg: #3a1815;
+    --field: #0f1218;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 1.05rem; margin: 0; margin-right: auto; }
+header label { font-size: .8rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+input[type=password], input[type=text], select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 14px; }
+button { min-height: 36px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 14px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--block); border-color: var(--block); }
+button:disabled { opacity: .5; cursor: default; }
+main { padding: 16px; max-width: 1280px; margin: 0 auto; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; text-align: left; cursor: pointer; }
+.tile[aria-pressed="true"] { outline: 2px solid var(--accent); }
+.tile b { display: block; font-size: 1.6rem; line-height: 1.1; }
+.tile span { font-size: .8rem; color: var(--muted); }
+.layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.panel h2 { font-size: .9rem; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+.tabs { display: flex; gap: 4px; }
+.tabs button { min-height: 28px; font-size: 13px; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+tbody tr { cursor: pointer; } tbody tr:hover, tbody tr[aria-selected="true"] { background: var(--hover); }
+tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+.pill.ALLOW, .pill.ACTIVE { background: var(--allow-bg); color: var(--allow); }
+.pill.STEP_UP { background: var(--step-bg); color: var(--step); }
+.pill.BLOCK, .pill.REVOKED { background: var(--block-bg); color: var(--block); }
+.scorebar { display: inline-block; width: 60px; height: 6px; background: var(--line); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.scorebar i { display: block; height: 100%; background: var(--accent); }
+.empty { padding: 28px 14px; color: var(--muted); text-align: center; }
+.detail { padding: 14px; }
+.detail h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; margin: 10px 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.reason { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.reason code { display: block; color: var(--muted); font-size: 11.5px; }
+.pts { float: right; font-weight: 700; }
+.msg { padding: 8px 16px; font-size: 13px; color: var(--muted); }
+.msg.err { color: var(--block); }
+pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11.5px; overflow: auto; max-height: 240px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FortGuard analyst portal</h1>
+  <label>API key <input type="password" id="key" autocomplete="off" value="dev-only-api-key" size="18"></label>
+  <label><input type="checkbox" id="auto" checked> Auto-refresh</label>
+  <button id="refresh" class="primary" type="button">Refresh</button>
+  <button id="sim" type="button" class="hidden">Run sample scenarios</button>
+</header>
+<div class="msg" id="msg" role="status"></div>
+<main>
+  <div class="tiles" role="group" aria-label="Filter by decision">
+    <button class="tile" data-level="" aria-pressed="true"><b id="n-total">0</b><span>All decisions</span></button>
+    <button class="tile" data-level="ALLOW" aria-pressed="false"><b id="n-ALLOW">0</b><span>Allow</span></button>
+    <button class="tile" data-level="STEP_UP" aria-pressed="false"><b id="n-STEP_UP">0</b><span>Step-up</span></button>
+    <button class="tile" data-level="BLOCK" aria-pressed="false"><b id="n-BLOCK">0</b><span>Block</span></button>
+  </div>
+  <div class="layout">
+    <section class="panel">
+      <h2>
+        <span id="list-title">Decisions</span>
+        <span class="tabs" role="tablist">
+          <button role="tab" id="t-dec" aria-selected="true" type="button">Decisions</button>
+          <button role="tab" id="t-dev" aria-selected="false" type="button">Devices</button>
+        </span>
+      </h2>
+      <div class="scroll" id="v-dec">
+        <table>
+          <thead><tr><th>Time</th><th>Session</th><th>User</th><th>Amount</th><th>Score</th><th>Decision</th><th>Top reason</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty hidden" id="empty">No decisions yet. Evaluate a session through the API, use the phone test page, or run the sample scenarios.</div>
+      </div>
+      <div class="scroll hidden" id="v-dev">
+        <table>
+          <thead><tr><th>Device</th><th>Platform</th><th>Attestation</th><th>Status</th><th>Key</th><th></th></tr></thead>
+          <tbody id="drows"></tbody>
+        </table>
+        <div class="empty hidden" id="dempty">No devices enrolled yet.</div>
+      </div>
+    </section>
+    <section class="panel" aria-live="polite">
+      <h2>Case detail</h2>
+      <div class="empty" id="no-sel">Select a decision to see why it was made.</div>
+      <div class="detail hidden" id="detail"></div>
+    </section>
+  </div>
+</main>
+
+<script src="/web/fgcore.js"></script>
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { level: "", decisions: [], devices: [], selected: null, tab: "dec", timer: null };
+
+  try { var saved = sessionStorage.getItem("fg_key"); if (saved) $("key").value = saved; } catch (e) { /* ignore */ }
+
+  function say(text, isErr) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (isErr ? " err" : ""); }
+  async function call(path, options) {
+    options = options || {}; options.headers = Object.assign({ "X-API-Key": $("key").value.trim() }, options.headers || {});
+    try { sessionStorage.setItem("fg_key", $("key").value.trim()); } catch (e) { /* ignore */ }
+    var res = await fetch(path, options);
+    var json = {}; try { json = await res.json(); } catch (e) { /* not json */ }
+    if (!res.ok) throw new Error((json.error && json.error.message) || ("HTTP " + res.status));
+    return json;
+  }
+  function el(tag, text, cls) { var e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+  function pill(level) { return el("span", level.replace("_", " "), "pill " + level); }
+  function when(ms) { return new Date(ms).toLocaleTimeString(); }
+  function short(id) { return id.length > 14 ? id.slice(0, 14) + "…" : id; }
+  function money(d) { return d.amount == null ? "–" : d.currency + " " + Number(d.amount).toLocaleString(); }
+
+  async function load() {
+    try {
+      var q = "/v1/admin/decisions?limit=200" + (state.level ? "&level=" + state.level : "");
+      var data = await call(q);
+      state.decisions = data.decisions;
+      ["total", "ALLOW", "STEP_UP", "BLOCK"].forEach(function (k) { $("n-" + k).textContent = data.counts[k]; });
+      $("sim").classList.toggle("hidden", !data.dev_mode);
+      state.devices = (await call("/v1/admin/devices")).devices;
+      say("Updated " + new Date().toLocaleTimeString());
+      render();
+    } catch (e) { say(e.message === "missing or wrong X-API-Key" ? "Enter the API key to load data." : "Could not load: " + e.message, true); }
+  }
+
+  function render() {
+    var rows = $("rows"); rows.innerHTML = "";
+    $("empty").classList.toggle("hidden", state.decisions.length > 0);
+    state.decisions.forEach(function (d) {
+      var tr = document.createElement("tr"); tr.tabIndex = 0;
+      tr.setAttribute("aria-selected", state.selected === d.session_id + d.time_ms ? "true" : "false");
+      var bar = el("span", "", "scorebar"); var fill = document.createElement("i"); fill.style.width = d.risk_score / 10 + "%"; bar.appendChild(fill);
+      var scoreCell = el("td"); scoreCell.appendChild(bar); scoreCell.appendChild(document.createTextNode(d.risk_score));
+      var decisionCell = el("td"); decisionCell.appendChild(pill(d.risk_level));
+      var top = d.score_breakdown.length ? d.score_breakdown[0].reason.replace(/^REASON_/, "").replace(/_/g, " ").toLowerCase() : "–";
+      [el("td", when(d.time_ms)), el("td", short(d.session_id)), el("td", d.user_id), el("td", money(d)), scoreCell, decisionCell, el("td", top)]
+        .forEach(function (td) { tr.appendChild(td); });
+      var pick = function () { state.selected = d.session_id + d.time_ms; show(d); render(); };
+      tr.addEventListener("click", pick);
+      tr.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      rows.appendChild(tr);
+    });
+    var drows = $("drows"); drows.innerHTML = "";
+    $("dempty").classList.toggle("hidden", state.devices.length > 0);
+    state.devices.forEach(function (d) {
+      var tr = document.createElement("tr");
+      var statusCell = el("td"); statusCell.appendChild(el("span", d.status, "pill " + d.status));
+      var actionCell = el("td");
+      if (d.status === "ACTIVE") {
+        var b = el("button", "Revoke", "danger"); b.type = "button";
+        b.addEventListener("click", function () { revoke(d.device_guid); }); actionCell.appendChild(b);
+      }
+      [el("td", d.device_guid), el("td", d.platform), el("td", d.integrity_level), statusCell, el("td", "v" + d.key_version + " · " + d.key_sha256.slice(0, 8)), actionCell]
+        .forEach(function (td) { tr.appendChild(td); });
+      drows.appendChild(tr);
+    });
+  }
+
+  function show(d) {
+    $("no-sel").classList.add("hidden");
+    var box = $("detail"); box.classList.remove("hidden"); box.innerHTML = "";
+    var head = el("div"); head.appendChild(pill(d.risk_level));
+    head.appendChild(document.createTextNode("  " + d.risk_score + " / 1000"));
+    box.appendChild(head);
+    box.appendChild(el("p", "Recommended action: " + (FGCore.ACTIONS[d.action_recommended] || d.action_recommended)));
+    var dev = state.devices.filter(function (x) { return x.device_guid === d.device_guid; })[0];
+    var kv = el("dl", "", "kv");
+    [["Session", d.session_id], ["User", d.user_id], ["Device", d.device_guid + (dev ? " (" + dev.status.toLowerCase() + ")" : "")],
+     ["Attestation", d.device_integrity || "none"], ["Event", d.event_type], ["Amount", money(d)],
+     ["Beneficiary", d.beneficiary_last4 ? "…" + d.beneficiary_last4 + (d.is_new_beneficiary ? " (new)" : "") : "–"],
+     ["Signals used", d.signals_used], ["Bot probability", Math.round(d.threat_details.bot_probability * 100) + "%"],
+     ["Coercion probability", Math.round(d.threat_details.coercion_scam_probability * 100) + "%"],
+     ["Remote tool", d.threat_details.rat_detected ? "yes" : "no"], ["Model", d.model_version + " · " + d.latency_ms + " ms"]]
+      .forEach(function (p) { kv.appendChild(el("dt", p[0])); kv.appendChild(el("dd", p[1])); });
+    box.appendChild(kv);
+    box.appendChild(el("h3", "Why this score"));
+    if (!d.score_breakdown.length) box.appendChild(el("p", "No risk signals fired.", "msg"));
+    d.score_breakdown.forEach(function (item) {
+      var r = el("div", "", "reason"); r.appendChild(el("span", "+" + item.points, "pts"));
+      r.appendChild(el("div", FGCore.REASONS[item.reason] || item.reason)); r.appendChild(el("code", item.reason)); box.appendChild(r);
+    });
+    var actions = el("div"); actions.style.marginTop = "12px";
+    if (dev && dev.status === "ACTIVE") { var b = el("button", "Revoke this device", "danger"); b.type = "button"; b.addEventListener("click", function () { revoke(dev.device_guid); }); actions.appendChild(b); }
+    box.appendChild(actions);
+    var raw = el("details"); raw.appendChild(el("summary", "Raw record")); raw.appendChild(el("pre", JSON.stringify(d, null, 2))); box.appendChild(raw);
+  }
+
+  async function revoke(guid) {
+    if (!window.confirm("Revoke " + guid + "? It will no longer be able to send telemetry or enroll.")) return;
+    try { await call("/v1/devices/" + encodeURIComponent(guid) + "/revoke", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); say("Revoked " + guid); await load(); }
+    catch (e) { say("Revoke failed: " + e.message, true); }
+  }
+
+  async function simulate() {
+    $("sim").disabled = true; say("Running sample scenarios…");
+    try {
+      var list = (await call("/v1/dev/scenarios")).scenarios;
+      for (var i = 0; i < list.length; i++) await call("/v1/dev/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scenario: list[i] }) });
+      await load();
+    } catch (e) { say("Simulation failed: " + e.message, true); }
+    $("sim").disabled = false;
+  }
+
+  document.querySelectorAll(".tile").forEach(function (t) {
+    t.addEventListener("click", function () {
+      state.level = t.dataset.level;
+      document.querySelectorAll(".tile").forEach(function (x) { x.setAttribute("aria-pressed", x === t ? "true" : "false"); });
+      load();
+    });
+  });
+  function tab(which) {
+    state.tab = which;
+    $("t-dec").setAttribute("aria-selected", which === "dec"); $("t-dev").setAttribute("aria-selected", which === "dev");
+    $("v-dec").classList.toggle("hidden", which !== "dec"); $("v-dev").classList.toggle("hidden", which !== "dev");
+  }
+  $("t-dec").addEventListener("click", function () { tab("dec"); }); $("t-dev").addEventListener("click", function () { tab("dev"); });
+  $("refresh").addEventListener("click", load); $("sim").addEventListener("click", simulate);
+  $("key").addEventListener("change", load);
+  function schedule() { clearInterval(state.timer); if ($("auto").checked) state.timer = setInterval(load, 5000); }
+  $("auto").addEventListener("change", schedule);
+  schedule(); load();
+})();
+</script>
+</body>
+</html>

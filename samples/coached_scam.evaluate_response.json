@@ -1,0 +1,41 @@
+{
+  "action_recommended": "CHALLENGE_FIDO2_OR_OTP",
+  "degraded": false,
+  "latency_ms": 0.0,
+  "model_version": "rules-0.2.0",
+  "reason_codes": [
+    "REASON_ACTIVE_CALL_DURING_PAYMENT",
+    "REASON_COGNITIVE_HESITATION_DETECTED",
+    "REASON_NEW_BENEFICIARY",
+    "REASON_COACHED_SCAM_PATTERN"
+  ],
+  "risk_level": "STEP_UP",
+  "risk_score": 700,
+  "score_breakdown": [
+    {
+      "points": 200,
+      "reason": "REASON_ACTIVE_CALL_DURING_PAYMENT"
+    },
+    {
+      "points": 200,
+      "reason": "REASON_COGNITIVE_HESITATION_DETECTED"
+    },
+    {
+      "points": 150,
+      "reason": "REASON_NEW_BENEFICIARY"
+    },
+    {
+      "points": 150,
+      "reason": "REASON_COACHED_SCAM_PATTERN"
+    }
+  ],
+  "scoring_mode": "RULES_ONLY",
+  "session_id": "sess_8oyelwnme9o2",
+  "signals_used": "ENVIRONMENT_AND_BEHAVIOR",
+  "threat_details": {
+    "bot_probability": 0.0,
+    "coercion_scam_probability": 1.0,
+    "rat_detected": false,
+    "user_biometric_match_score": null
+  }
+}
