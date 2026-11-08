@@ -211,6 +211,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
     admin.register(app, api_key=api_key, store=store, registry=registry, decisions=decisions,
                    clock=clock, dev_mode=dev_mode)
     backoffice.register(app, bo=bo, api_key=api_key, registry=registry, dev_mode=dev_mode)
+    backoffice.register_dev(app, bo=bo, api_key=api_key, clock=clock, dev_mode=dev_mode)
     return app
 
 

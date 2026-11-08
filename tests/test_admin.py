@@ -108,7 +108,7 @@ def test_devices_list_and_revoke_shows_in_it(api, enrolled):
 
 def test_portal_page_is_served_and_asks_for_no_data_itself(api):
     r = api.client.get("/portal")
-    assert r.status_code == 200 and b"FortGuard analyst portal" in r.data
+    assert r.status_code == 200 and b"FortGuard Back Office" in r.data
 
 
 def test_shared_js_is_served_but_other_web_files_are_not(api):

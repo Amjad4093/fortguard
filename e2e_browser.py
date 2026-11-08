@@ -24,7 +24,8 @@ ACCOUNT = "PK36EXMP00992201029381"
 
 def start_server():
     env = dict(os.environ, PORT=str(PORT))
-    proc = subprocess.Popen([sys.executable, "-m", "fortguard.app", "--dev", "--port", str(PORT)],
+    import tempfile
+    proc = subprocess.Popen([sys.executable, "-m", "fortguard.app", "--dev", "--port", str(PORT), "--data", tempfile.mkdtemp()],
                             cwd=pathlib.Path(__file__).parent, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     for _ in range(50):
         try:
@@ -133,17 +134,34 @@ def main():
             page.screenshot(path=str(shots / "phone_scam.png"), full_page=True)
             ok &= level2 in ("STEP_UP", "BLOCK")
 
-            # 3. The portal shows both, with reasons.
-            portal = ctx.new_page()
-            portal.set_viewport_size({"width": 1280, "height": 800})
+            # 3. The back office: sign in, dashboard, the blocked case, work it, rules page.
+            desk = browser.new_context(viewport={"width": 1440, "height": 900}, device_scale_factor=2)
+            portal = desk.new_page()
+            portal.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
             portal.goto(BASE + "/portal")
-            portal.wait_for_selector("#rows tr")
-            rows = portal.locator("#rows tr").count()
-            portal.locator("#rows tr").first.click()
-            portal.wait_for_selector("#detail:not(.hidden)")
-            portal.screenshot(path=str(shots / "portal.png"))
-            print("portal rows:", rows, "| device rows:", portal.locator("#drows tr").count())
-            ok &= rows >= 2
+            portal.fill("#l-user", "admin")
+            portal.fill("#l-pass", "fortguard-admin-dev")
+            portal.click("#login-form button")
+            portal.wait_for_selector("text=Decisions per hour")
+            portal.screenshot(path=str(shots / "portal_dashboard.png"))
+            portal.goto(BASE + "/portal#/cases")
+            portal.wait_for_selector("tbody tr.link")
+            open_cases = portal.locator("tbody tr.link").count()
+            portal.locator("tbody tr.link").first.click()
+            portal.wait_for_selector("text=Why FortGuard flagged it")
+            portal.click("text=Assign to me")
+            portal.wait_for_selector("text=Investigating")
+            portal.fill("textarea", "Customer confirmed someone on the phone told them to move money. Blocking.")
+            portal.click("text=Add note")
+            portal.wait_for_selector("text=Customer confirmed")
+            portal.screenshot(path=str(shots / "portal_case.png"), full_page=True)
+            portal.goto(BASE + "/portal#/rules")
+            portal.wait_for_selector("text=Points per signal")
+            portal.goto(BASE + "/portal#/audit")
+            portal.wait_for_selector("text=added a note")
+            print("open cases:", open_cases, "| case worked, note added, audit shows it")
+            ok &= open_cases >= 1
+            desk.close()
 
             errors = [l for l in logs if "PAGEERROR" in l or "Failed to load" in l]
             print("page errors:", errors or "none")

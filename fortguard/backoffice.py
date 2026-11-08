@@ -281,7 +281,8 @@ def register(app, *, bo, api_key, registry, dev_mode):
         return jsonify({
             "last_24h": {"total": len(rows), "ALLOW": levels["ALLOW"], "STEP_UP": levels["STEP_UP"], "BLOCK": levels["BLOCK"]},
             "top_reasons": reasons.most_common(8),
-            "hourly": [{"hour_ms": h, **v} for h, v in sorted(hourly.items())],
+            "hourly": [{"hour_ms": h, **hourly[h]} for h in
+                       range((since // 3_600_000 + 1) * 3_600_000, bo.now_ms() + 1, 3_600_000)] if rows else [],
             "cases": {s: statuses[s] for s in CASE_STATUSES},
             "devices": {"total": len(registry.all()), "revoked": sum(1 for d in registry.all() if d.status != "ACTIVE")},
         })
@@ -501,6 +502,33 @@ def register(app, *, bo, api_key, registry, dev_mode):
              "detail": json.loads(r["detail"]) if r["detail"] else None}
             for r in bo.q("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))
         ]})
+
+
+def register_dev(app, *, bo, api_key, clock, dev_mode):
+    """Dev mode only: let a signed-in analyst fill the portal with synthetic sessions."""
+    from flask import current_app
+
+    @app.post("/v1/bo/dev/simulate")
+    def bo_dev_simulate():
+        if not dev_mode:
+            raise ValidationFailure(404, "not_found", "no such endpoint")
+        header = request.headers.get("Authorization", "")
+        user = bo.user_for_token(header[7:]) if header.startswith("Bearer ") else None
+        if user is None:
+            raise ValidationFailure(401, "not_signed_in", "sign in first")
+        if RANK[user["role"]] < RANK["analyst"]:
+            raise ValidationFailure(403, "forbidden", "needs the analyst role")
+        from .client import InProcessTransport, run_session
+        from .generator import SCENARIOS, build_session
+
+        transport = InProcessTransport(current_app._get_current_object(), api_key=api_key)
+        seed0 = int(clock() * 1000) % 1_000_000
+        results = []
+        for i, name in enumerate(SCENARIOS):
+            status, body = run_session(transport, build_session(name, int(clock() * 1000), seed0 + i), now_ms=int(clock() * 1000))
+            results.append({"scenario": name, "risk_level": body.get("risk_level"), "risk_score": body.get("risk_score")})
+        bo.audit(user["username"], "dev_simulate", "scenarios", {"count": len(results)})
+        return jsonify({"results": results})
 
 
 def _limit(value, default):
