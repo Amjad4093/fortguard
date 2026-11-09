@@ -33,7 +33,7 @@ bank backend
   |  POST /v1/devices/<id>/revoke (X-API-Key) ->  stop trusting a device
 ```
 
-**New here? Read START_HERE.md first.** It explains the builds, the cloud test server and what to test.
+**New here? Read START_HERE.md first.** Progress against the 80-item backlog is in `docs/FortGuard_Backlog.xlsx` (Progress sheet). It explains the builds, the cloud test server and what to test.
 
 ## Back office
 
@@ -103,6 +103,8 @@ machines. Treat these as relative numbers, not capacity.
 | `POST /v1/devices/<id>/revoke` | Stop trusting a device. `200`. | `X-API-Key` |
 | `POST /v1/telemetry/stream` | One signed SDK batch. `202` with counts of what was kept. | device-key signature |
 | `POST /v1/risk/evaluate` | Decision for a session and transaction. `200`. | `X-API-Key` |
+| `POST /v1/feedback` | Bank-confirmed outcome for a session: `FRAUD` or `GENUINE`. Confirms or closes cases, opens one for missed fraud, cleans the user's baseline. `201`. | `X-API-Key` |
+| `GET /metrics` | Prometheus metrics: requests, latency histograms, decisions by level, rate-limited requests, devices and sessions. | `X-API-Key` or bearer |
 | `GET /v1/admin/decisions` | Recent decisions with counts, for the portal. Keeps only the last 4 digits of the beneficiary account. | `X-API-Key` |
 | `GET /v1/admin/devices` | Enrolled devices. | `X-API-Key` |
 | `GET /portal`, `GET /healthz` | Portal page; liveness and model version. | none (portal data needs the key) |
@@ -123,6 +125,17 @@ Errors are always `{"error": {"code": "...", "message": "..."}}`.
 | 503 | `busy` | too many open challenges |
 
 `request_id` on evaluate makes the call idempotent: the same id returns the same answer.
+
+`allow_degraded: true` on evaluate turns on degraded mode (PRD fail policy): with no telemetry for the
+session, or if scoring fails, FortGuard answers from the transaction alone, marked `degraded: true`.
+A new payee or an amount of 100,000 PKR or more steps up; everything else is allowed. It never blocks.
+
+Each response carries `baseline`: the user's behavioral baseline status (`NONE`, `LEARNING` below 10
+allowed sessions, `MATURE`), and once mature the biometric match score (0 to 1) that also appears as
+`threat_details.user_biometric_match_score`. A mature match below 0.35 adds `REASON_BEHAVIORAL_ANOMALY_HIGH`.
+
+Every response has an `X-Request-ID` and security headers. Rate limits per minute: sign-in 20 and device
+challenges 30 per client IP, telemetry 240 per device, evaluate 6000 per API key (`config.RATE_LIMITS`).
 
 Samples are in `samples/`: an enrollment request, a signed telemetry payload, an evaluate request and
 the response, for a genuine session and a coached-scam session. They are reproducible and checked in CI.
