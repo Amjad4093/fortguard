@@ -22,6 +22,9 @@ jobs:
           cache: pip
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Make the Gradle wrapper executable (lost when files are uploaded through the website)
+        run: chmod +x android/gradlew
+
       - name: Start a FortGuard dev server for the live SDK tests
         run: |
           pip install -r requirements.txt
