@@ -1,0 +1,5 @@
+flask>=3.0
+numpy>=1.26
+requests>=2.31
+cryptography>=46.0
+pytest>=8.0

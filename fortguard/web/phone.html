@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FortGuard test client</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7;
+  --accent: #1f4fd8; --accent-ink: #ffffff;
+  --allow: #1d7a46; --allow-bg: #e3f4ea; --step: #8a5a00; --step-bg: #fdf0d2; --block: #b3261e; --block-bg: #fbe3e1;
+  --field: #ffffff; --warn-bg: #fff6dc; --warn-line: #e8d28a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11141a; --card: #1a1f28; --ink: #eaeef4; --muted: #9aa5b4; --line: #2b3340;
+    --accent: #6f93ff; --accent-ink: #0b1020;
+    --allow: #5fd08e; --allow-bg: #15301f; --step: #f0bd55; --step-bg: #35290d; --block: #ff8a80; --block-bg: #3a1815;
+    --field: #11141a; --warn-bg: #2d2610; --warn-line: #5a4b1c;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.25rem; margin: 4px 0 4px; }
+h2 { font-size: 1rem; margin: 0 0 10px; }
+.note { color: var(--muted); font-size: .875rem; margin: 0 0 12px; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 10px 12px; font-size: .875rem; margin-bottom: 12px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+label { display: block; font-size: .875rem; color: var(--muted); margin: 10px 0 4px; }
+input[type=text], input[type=number], input[type=password], select {
+  width: 100%; min-height: 44px; padding: 8px 10px; font-size: 16px; color: var(--ink);
+  background: var(--field); border: 1px solid var(--line); border-radius: 8px;
+}
+.check { display: flex; align-items: center; gap: 10px; min-height: 40px; color: var(--ink); font-size: .95rem; margin: 0; }
+.check input { width: 20px; height: 20px; }
+button { min-height: 44px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 1rem; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.row > * { flex: 1 1 auto; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: .875rem; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+#pad { touch-action: none; user-select: none; -webkit-user-select: none; height: 120px; border: 2px dashed var(--line); border-radius: 10px;
+  display: grid; place-items: center; color: var(--muted); font-size: .875rem; text-align: center; padding: 8px; }
+.pill { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: .95rem; }
+.pill.ALLOW { background: var(--allow-bg); color: var(--allow); } .pill.STEP_UP { background: var(--step-bg); color: var(--step); } .pill.BLOCK { background: var(--block-bg); color: var(--block); }
+.score { font-size: 2.2rem; font-weight: 700; line-height: 1; }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+ul.reasons { list-style: none; padding: 0; margin: 8px 0 0; }
+ul.reasons li { padding: 8px 0; border-top: 1px solid var(--line); font-size: .9rem; }
+ul.reasons code { font-size: .75rem; color: var(--muted); display: block; }
+.pts { float: right; font-weight: 600; }
+.err { color: var(--block); font-size: .875rem; min-height: 1.2em; margin-top: 6px; }
+pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-size: .72rem; overflow: auto; max-height: 260px; }
+details { margin-bottom: 12px; } summary { cursor: pointer; padding: 8px 0; color: var(--muted); font-size: .9rem; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FortGuard test client</h1>
+  <p class="note">A browser stand-in for the mobile SDK. It records touch, typing <em>timing</em> and motion, signs each batch with a key kept in this browser, and asks the server for a decision.</p>
+  <div class="warn"><strong>Development harness.</strong> Attestation here is simulated, so this proves the flow, not device security. The typed characters never leave this page: only key timing and the field name are sent.</div>
+
+  <section class="card" aria-labelledby="h-device">
+    <h2 id="h-device">This device</h2>
+    <dl class="kv">
+      <dt>Device</dt><dd id="s-device">–</dd>
+      <dt>Enrollment</dt><dd id="s-enroll">not enrolled</dd>
+      <dt>Motion sensors</dt><dd id="s-motion">off: tap "Enable motion sensors" below</dd>
+      <dt>Session</dt><dd id="s-session">–</dd>
+      <dt>Captured so far</dt><dd id="s-counts">0 touch, 0 key, 0 UI, 0 motion</dd>
+    </dl>
+    <div class="row">
+      <button id="b-motion" type="button">Enable motion sensors</button>
+      <button id="b-newsession" type="button">New session</button>
+      <button id="b-reset" type="button">Reset device</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-sim">
+    <h2 id="h-sim">Conditions to simulate</h2>
+    <p class="note">These flags are self-reported by the app. A real SDK detects them itself.</p>
+    <label class="check"><input type="checkbox" id="f-active_call"> On a phone call</label>
+    <label class="check"><input type="checkbox" id="f-screen_sharing"> Screen sharing is on</label>
+    <label class="check"><input type="checkbox" id="f-active_remote_software"> Remote-access tool running</label>
+    <label class="check"><input type="checkbox" id="f-is_rooted"> Rooted or jailbroken</label>
+    <label class="check"><input type="checkbox" id="f-is_emulator"> Emulator</label>
+    <label class="check"><input type="checkbox" id="f-has_hooking_framework"> Hooking framework present</label>
+    <label class="check"><input type="checkbox" id="f-vpn"> VPN</label>
+    <label class="check"><input type="checkbox" id="f-mock_location"> Mock location</label>
+    <label class="check"><input type="checkbox" id="c-consent" checked> User consented to behavioral capture</label>
+    <label for="level">Attestation level the simulated authority grants</label>
+    <select id="level"><option>STRONG</option><option>DEVICE</option><option>BASIC</option></select>
+  </section>
+
+  <section class="card" aria-labelledby="h-tx">
+    <h2 id="h-tx">Transfer</h2>
+    <label for="acct">Beneficiary account</label>
+    <input type="text" id="acct" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="PK36EXMP00992201029381">
+    <label for="amount">Amount (PKR)</label>
+    <input type="text" id="amount" inputmode="decimal" autocomplete="off" placeholder="250000">
+    <label class="check"><input type="checkbox" id="newpayee" checked> New beneficiary</label>
+    <label>Swipe here a few times (drawn gestures are part of the signal)</label>
+    <div id="pad">Swipe pad</div>
+    <div class="err" id="form-err" role="alert"></div>
+    <div class="row"><button id="b-check" class="primary" type="button">Check risk</button></div>
+  </section>
+
+  <section class="card hidden" id="result" aria-live="polite">
+    <h2>Decision</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div><span class="score" id="r-score">0</span><span class="note"> / 1000</span></div>
+      <span class="pill" id="r-level">ALLOW</span>
+    </div>
+    <div class="bar"><i id="r-bar" style="width:0%"></i></div>
+    <div id="r-action" class="note"></div>
+    <ul class="reasons" id="r-reasons"></ul>
+    <p class="note" id="r-more"></p>
+    <p class="note"><a id="r-portal" href="/portal" target="_blank" rel="noopener">Open the analyst portal</a></p>
+  </section>
+
+  <details>
+    <summary>What leaves this device (last batch)</summary>
+    <p class="note">Key events carry a type, a timestamp and a field name. No characters.</p>
+    <pre id="last-batch">nothing sent yet</pre>
+  </details>
+  <details>
+    <summary>Settings and log</summary>
+    <label for="apikey">API key (stands in for the bank backend)</label>
+    <input type="text" id="apikey" value="dev-only-api-key" autocomplete="off">
+    <pre id="log"></pre>
+  </details>
+</main>
+
+<script src="/web/fgcore.js"></script>
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var subtle = (window.crypto && window.crypto.subtle) || null;
+  var APP_ID = "com.example.mobilebank";
+  var CAPS = { touch: 4000, keys: 1500, ui: 400, sensor: 4000 };
+  var FLAGS = ["active_call", "screen_sharing", "active_remote_software", "is_rooted", "is_emulator", "has_hooking_framework", "vpn", "mock_location"];
+
+  // --- storage helpers (may be unavailable in private windows) ----------------------------------
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* memory only */ } }
+  function idb() {
+    return new Promise(function (resolve, reject) {
+      var open = indexedDB.open("fortguard-test", 1);
+      open.onupgradeneeded = function () { open.result.createObjectStore("keys"); };
+      open.onsuccess = function () { resolve(open.result); };
+      open.onerror = function () { reject(open.error); };
+    });
+  }
+  async function idbGet(name) {
+    try { var db = await idb(); return await new Promise(function (res) { var r = db.transaction("keys").objectStore("keys").get(name); r.onsuccess = function () { res(r.result || null); }; r.onerror = function () { res(null); }; }); } catch (e) { return null; }
+  }
+  async function idbPut(name, value) {
+    try { var db = await idb(); await new Promise(function (res) { var t = db.transaction("keys", "readwrite"); t.objectStore("keys").put(value, name); t.oncomplete = res; t.onerror = res; }); } catch (e) { /* memory only */ }
+  }
+  async function idbClear() { try { var db = await idb(); db.transaction("keys", "readwrite").objectStore("keys").clear(); } catch (e) { /* ignore */ } }
+
+  // --- identity -----------------------------------------------------------------------------------
+  function rand(n) {
+    var a = new Uint8Array(n); crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]; }).join("");
+  }
+  var deviceGuid = lsGet("fg_device") || ("dev_" + rand(12));
+  lsSet("fg_device", deviceGuid);
+  var userId = lsGet("fg_user") || ("usr_" + rand(8));
+  lsSet("fg_user", userId);
+  var state = { keyPair: null, enrolledLevel: null, sessionId: "sess_" + rand(12), seq: 0, motionOn: false };
+  var buf = { touch: [], key: [], ui: [], accel: [], gyro: [] };
+  var totals = { touch: 0, key: 0, ui: 0, sensor: 0 };
+
+  // --- logging ----------------------------------------------------------------------------------------
+  function log(line) {
+    var el = $("log"); el.textContent = (new Date().toLocaleTimeString() + "  " + line + "\n" + el.textContent).slice(0, 6000);
+  }
+  function refresh() {
+    $("s-device").textContent = deviceGuid;
+    $("s-session").textContent = state.sessionId;
+    $("s-enroll").textContent = state.enrolledLevel ? "enrolled (attestation level " + state.enrolledLevel + ")" : "not enrolled";
+    $("s-counts").textContent = totals.touch + " touch, " + totals.key + " key, " + totals.ui + " UI, " + totals.sensor + " motion";
+  }
+
+  // --- API ------------------------------------------------------------------------------------------
+  async function post(path, body, withKey) {
+    var headers = { "Content-Type": "application/json" };
+    if (withKey) headers["X-API-Key"] = $("apikey").value.trim();
+    var res = await fetch(path, { method: "POST", headers: headers, body: JSON.stringify(body) });
+    var json = null; try { json = await res.json(); } catch (e) { /* not json */ }
+    return { status: res.status, json: json || {} };
+  }
+  function errText(r) { return (r.json.error && (r.json.error.code + ": " + r.json.error.message)) || ("HTTP " + r.status); }
+
+  // --- enrollment -------------------------------------------------------------------------------------
+  async function ensureKey() {
+    if (state.keyPair) return state.keyPair;
+    var stored = await idbGet("pair:" + deviceGuid);
+    if (stored) { state.keyPair = stored; return stored; }
+    // extractable=false: the private key can sign but can never be read back, as with a hardware key.
+    state.keyPair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    await idbPut("pair:" + deviceGuid, state.keyPair);
+    return state.keyPair;
+  }
+  async function ensureEnrolled(force) {
+    var level = $("level").value;
+    if (!force && state.enrolledLevel === level) return true;
+    if (!subtle) { $("form-err").textContent = "This page needs HTTPS (or localhost) for signing. Start the server with --https."; return false; }
+    var pair = await ensureKey();
+    var ch = await post("/v1/devices/challenge", {});
+    if (ch.status !== 201) { log("challenge failed: " + errText(ch)); return false; }
+    var spki = new Uint8Array(await subtle.exportKey("spki", pair.publicKey));
+    var publicKey = FGCore.b64url(spki);
+    var common = { device_guid: deviceGuid, app_id: APP_ID, platform: "Web", challenge: ch.json.challenge, public_key: publicKey };
+    var att = await post("/v1/dev/attest", Object.assign({ level: level }, common), false);
+    if (att.status !== 200) { log("dev attest failed: " + errText(att) + " (is the server running with --dev?)"); return false; }
+    var en = await post("/v1/devices/enroll", Object.assign({ attestation: att.json.attestation }, common), false);
+    log("POST /v1/devices/enroll -> " + en.status + (en.status === 201 ? " level " + en.json.integrity_level : " " + errText(en)));
+    if (en.status !== 201) { $("form-err").textContent = "Enrollment failed: " + errText(en); return false; }
+    state.enrolledLevel = en.json.integrity_level;
+    refresh();
+    return true;
+  }
+
+  // --- capture ----------------------------------------------------------------------------------------
+  // Privacy: handlers read event type, time and which field. They never read e.key, e.code, e.data,
+  // the input value, or the clipboard. tests/test_web_signing.py scans this file to keep it that way.
+  function now() { return Date.now(); }
+  function fieldOf(el) {
+    if (el && el.id === "acct") return "beneficiary_account";
+    if (el && el.id === "amount") return "amount";
+    return "other";
+  }
+  function push(kind, item, cap) { if (buf[kind].length < cap) { buf[kind].push(item); totals[kind === "accel" || kind === "gyro" ? "sensor" : kind]++; } }
+
+  var down = false, lastMove = 0;
+  function touchEvent(type, e) {
+    var size = Math.min(1000, Math.max(0, Math.max(e.width || 0, e.height || 0)));
+    push("touch", { event_type: type, x: FGCore.round3(e.clientX), y: FGCore.round3(e.clientY),
+      pressure: FGCore.round3(Math.min(2, Math.max(0, e.pressure || 0))), size: FGCore.round3(size), timestamp_ms: now() }, CAPS.touch);
+  }
+  document.addEventListener("pointerdown", function (e) { down = true; touchEvent("DOWN", e); refresh(); }, true);
+  document.addEventListener("pointermove", function (e) {
+    if (!down) return; var t = now(); if (t - lastMove < 8) return; lastMove = t; touchEvent("MOVE", e);
+  }, true);
+  function end(e) { if (!down) return; down = false; touchEvent("UP", e); refresh(); }
+  document.addEventListener("pointerup", end, true);
+  document.addEventListener("pointercancel", end, true);
+
+  document.addEventListener("keydown", function (e) { if (e.repeat || !isField(e.target)) return; push("key", { event_type: "DOWN", ts: now(), field: fieldOf(e.target) }, CAPS.keys); }, true);
+  document.addEventListener("keyup", function (e) { if (!isField(e.target)) return; push("key", { event_type: "UP", ts: now(), field: fieldOf(e.target) }, CAPS.keys); refresh(); }, true);
+  document.addEventListener("paste", function (e) { if (isField(e.target)) { push("ui", { event_type: "PASTE", field: fieldOf(e.target), ts: now() }, CAPS.ui); refresh(); } }, true);
+  document.addEventListener("focusin", function (e) { if (isField(e.target)) push("ui", { event_type: "FOCUS", field: fieldOf(e.target), ts: now() }, CAPS.ui); }, true);
+  function isField(el) { return el && (el.id === "acct" || el.id === "amount"); }
+
+  var lastMotion = 0;
+  function onMotion(e) {
+    var t = now(); if (t - lastMotion < 20) return; lastMotion = t;
+    var a = e.accelerationIncludingGravity, r = e.rotationRate;
+    if (a && a.x !== null && a.y !== null && a.z !== null) push("accel", { x: FGCore.round3(a.x), y: FGCore.round3(a.y), z: FGCore.round3(a.z), ts: t }, CAPS.sensor);
+    if (r && r.alpha !== null && r.beta !== null && r.gamma !== null) {
+      var k = Math.PI / 180; // deg/s to rad/s
+      push("gyro", { x: FGCore.round3(r.beta * k), y: FGCore.round3(r.gamma * k), z: FGCore.round3(r.alpha * k), ts: t }, CAPS.sensor);
+    }
+    $("s-motion").textContent = "receiving (" + totals.sensor + " samples)";
+  }
+  async function enableMotion() {
+    if (state.motionOn) return;
+    if (typeof DeviceMotionEvent === "undefined") { $("s-motion").textContent = "not supported by this browser"; return; }
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+      try { var p = await DeviceMotionEvent.requestPermission(); if (p !== "granted") { $("s-motion").textContent = "permission denied"; return; } }
+      catch (err) { $("s-motion").textContent = "permission error"; return; }
+    }
+    window.addEventListener("devicemotion", onMotion);
+    state.motionOn = true; $("s-motion").textContent = "on, waiting for data (a laptop has none)";
+  }
+
+  // --- sending ------------------------------------------------------------------------------------------
+  function environment() {
+    var env = { os: "Web", os_version: "browser" };
+    FLAGS.forEach(function (f) { env[f] = $("f-" + f).checked; });
+    return env;
+  }
+  async function flush(force) {
+    var n = buf.touch.length + buf.key.length + buf.ui.length + buf.accel.length + buf.gyro.length;
+    if (!n && !force) return true;
+    if (!(await ensureEnrolled(false))) return false;
+    var batch = {
+      session_id: state.sessionId, device_guid: deviceGuid, app_id: APP_ID, timestamp_ms: now(),
+      nonce: "n_" + rand(16), seq: state.seq++, consent: { behavioral: $("c-consent").checked },
+      environment: environment(),
+      touch_events: buf.touch.splice(0, 4000), key_events: buf.key.splice(0, 1500), ui_events: buf.ui.splice(0, 400),
+      sensor_data: { accelerometer: buf.accel.splice(0, 4000), gyroscope: buf.gyro.splice(0, 4000) }
+    };
+    var signed = await FGCore.sign(batch, (await ensureKey()).privateKey, subtle);
+    var res = await post("/v1/telemetry/stream", signed, false);
+    if (res.status === 401 && res.json.error && res.json.error.code === "unknown_device") {
+      log("server forgot this device (restart?) - enrolling again");
+      state.enrolledLevel = null;
+      if (await ensureEnrolled(true)) { signed.nonce = "n_" + rand(16); signed = await FGCore.sign(signed, (await ensureKey()).privateKey, subtle); res = await post("/v1/telemetry/stream", signed, false); }
+    }
+    log("POST /v1/telemetry/stream -> " + res.status + (res.status === 202 ? " kept " + JSON.stringify(res.json.accepted) : " " + errText(res)));
+    if (res.status === 400 && res.json.error && res.json.error.code === "stale_timestamp") $("form-err").textContent = "This device's clock differs from the server's by more than 5 minutes.";
+    var shown = JSON.stringify(signed, null, 1);
+    $("last-batch").textContent = shown.length > 5000 ? shown.slice(0, 5000) + "\n... (" + shown.length + " characters in total)" : shown;
+    refresh();
+    return res.status === 202;
+  }
+
+  // --- decision ------------------------------------------------------------------------------------------
+  function renderResult(r) {
+    $("result").classList.remove("hidden");
+    $("r-score").textContent = r.risk_score;
+    var pill = $("r-level"); pill.textContent = r.risk_level.replace("_", " "); pill.className = "pill " + r.risk_level;
+    $("r-bar").style.width = Math.min(100, r.risk_score / 10) + "%";
+    $("r-action").textContent = "Recommended action: " + (FGCore.ACTIONS[r.action_recommended] || r.action_recommended);
+    var ul = $("r-reasons"); ul.innerHTML = "";
+    if (!r.score_breakdown.length) { var li = document.createElement("li"); li.textContent = "No risk signals fired."; ul.appendChild(li); }
+    r.score_breakdown.forEach(function (item) {
+      var li = document.createElement("li");
+      var pts = document.createElement("span"); pts.className = "pts"; pts.textContent = "+" + item.points;
+      var text = document.createElement("div"); text.textContent = FGCore.REASONS[item.reason] || item.reason;
+      var code = document.createElement("code"); code.textContent = item.reason;
+      li.appendChild(pts); li.appendChild(text); li.appendChild(code); ul.appendChild(li);
+    });
+    var t = r.threat_details;
+    $("r-more").textContent = "Bot " + Math.round(t.bot_probability * 100) + "%, coercion " + Math.round(t.coercion_scam_probability * 100) + "%, remote tool " + (t.rat_detected ? "yes" : "no") + ". Signals used: " + r.signals_used + ". Scored in " + r.latency_ms + " ms.";
+  }
+  async function check() {
+    var err = $("form-err"); err.textContent = "";
+    var acct = $("acct").value.trim(), amt = Number($("amount").value.replace(/,/g, ""));
+    if (acct.length < 8 || acct.length > 40) { err.textContent = "Enter a beneficiary account of 8 to 40 characters."; return; }
+    if (!isFinite(amt) || amt <= 0) { err.textContent = "Enter an amount greater than zero."; return; }
+    $("b-check").disabled = true;
+    try {
+      push("ui", { event_type: "SUBMIT", field: "other", ts: now() }, CAPS.ui);
+      if (!(await flush(true))) return;
+      var body = { session_id: state.sessionId, user_id: userId, event_type: "FUNDS_TRANSFER", request_id: "req_" + rand(12),
+        transaction_details: { amount: amt, currency: "PKR", beneficiary_account: acct, is_new_beneficiary: $("newpayee").checked } };
+      var res = await post("/v1/risk/evaluate", body, true);
+      log("POST /v1/risk/evaluate -> " + res.status);
+      if (res.status !== 200) { err.textContent = "Evaluate failed: " + errText(res); return; }
+      renderResult(res.json);
+    } catch (e) { err.textContent = "Error: " + e.message; log("error " + e.message); }
+    finally { $("b-check").disabled = false; }
+  }
+
+  // --- controls ----------------------------------------------------------------------------------------------
+  $("b-check").addEventListener("click", check);
+  $("b-motion").addEventListener("click", enableMotion);
+  $("level").addEventListener("change", function () { state.enrolledLevel = null; refresh(); });
+  $("b-newsession").addEventListener("click", function () {
+    state.sessionId = "sess_" + rand(12); state.seq = 0;
+    buf = { touch: [], key: [], ui: [], accel: [], gyro: [] }; totals = { touch: 0, key: 0, ui: 0, sensor: 0 };
+    $("result").classList.add("hidden"); $("acct").value = ""; $("amount").value = ""; refresh();
+  });
+  $("b-reset").addEventListener("click", async function () {
+    await idbClear(); state.keyPair = null; state.enrolledLevel = null;
+    deviceGuid = "dev_" + rand(12); lsSet("fg_device", deviceGuid); $("b-newsession").click(); log("device reset"); refresh();
+  });
+  setInterval(function () { flush(false).catch(function (e) { log("flush error " + e.message); }); }, 5000);
+  if (!subtle) $("form-err").textContent = "This page needs HTTPS (or localhost) for signing. Start the server with --https.";
+  refresh();
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission !== "function") enableMotion();
+})();
+</script>
+</body>
+</html>

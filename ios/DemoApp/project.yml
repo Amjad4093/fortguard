@@ -1,0 +1,35 @@
+# XcodeGen spec for the FortGuard iOS demo app. Generate the Xcode project with:  xcodegen generate
+name: FortGuardDemo
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  FortGuardSDK:
+    path: ../FortGuardSDK
+targets:
+  FortGuardDemo:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      - package: FortGuardSDK
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: FortGuard Demo
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # DEMO ONLY: plain HTTP to a test server. A production app uses HTTPS with pinning.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mobilebank   # must be on the server's allowed list
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+    scheme: {}

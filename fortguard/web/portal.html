@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FortGuard Back Office</title>
+<style>
+:root {
+  --bg: #f4f5f8; --card: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --hover: #eef2fb;
+  --side: #10172a; --side-ink: #c9d2e3; --side-active: #ffffff; --side-hi: #1f2a44;
+  --accent: #1f4fd8; --accent-ink: #ffffff; --field: #ffffff;
+  --allow: #1d7a46; --allow-bg: #e3f4ea; --step: #8a5a00; --step-bg: #fdf0d2; --block: #b3261e; --block-bg: #fbe3e1;
+  --info: #1f4fd8; --info-bg: #e6edfd; --grey-bg: #eceef2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --card: #181d26; --ink: #eaeef4; --muted: #9aa5b4; --line: #2a3240; --hover: #1f2735;
+    --side: #0a0e17; --side-ink: #9aa5b4; --side-active: #ffffff; --side-hi: #1a2234;
+    --accent: #6f93ff; --accent-ink: #0b1020; --field: #0f1218;
+    --allow: #5fd08e; --allow-bg: #15301f; --step: #f0bd55; --step-bg: #35290d; --block: #ff8a80; --block-bg: #3a1815;
+    --info: #8fb0ff; --info-bg: #17223d; --grey-bg: #232a36;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+input, select, textarea { min-height: 36px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--field); }
+textarea { width: 100%; min-height: 80px; resize: vertical; }
+button { min-height: 36px; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--block); border-color: var(--block); }
+button:disabled { opacity: .5; cursor: default; }
+a { color: var(--accent); }
+.hidden { display: none !important; }
+
+/* sign in */
+#login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+#login form { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px; }
+#login h1 { margin: 0 0 4px; font-size: 1.35rem; }
+#login label { display: block; font-size: .85rem; color: var(--muted); margin: 14px 0 4px; }
+#login input { width: 100%; }
+#login button { width: 100%; margin-top: 18px; }
+
+/* shell */
+#app { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+nav { background: var(--side); color: var(--side-ink); padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; }
+nav .brand { color: var(--side-active); font-weight: 700; font-size: 1.05rem; padding: 4px 10px 16px; }
+nav a { color: var(--side-ink); text-decoration: none; padding: 9px 10px; border-radius: 7px; display: flex; justify-content: space-between; }
+nav a:hover { background: var(--side-hi); }
+nav a[aria-current="page"] { background: var(--side-hi); color: var(--side-active); font-weight: 600; }
+nav .count { background: var(--block); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 12px; font-weight: 700; }
+nav .spacer { flex: 1; }
+nav .who { font-size: .8rem; padding: 10px; border-top: 1px solid var(--side-hi); }
+nav .who button { margin-top: 8px; width: 100%; background: transparent; color: var(--side-ink); border-color: var(--side-hi); }
+main { padding: 20px 24px 40px; min-width: 0; }
+@media (max-width: 860px) {
+  #app { grid-template-columns: 1fr; }
+  nav { flex-direction: row; flex-wrap: wrap; padding: 8px; gap: 4px; }
+  nav .brand { width: 100%; padding: 4px 8px 6px; }
+  nav .spacer { display: none; }
+  nav .who { width: 100%; border: 0; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  nav .who button { margin: 0; width: auto; }
+  main { padding: 16px; }
+}
+.pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.pagehead h1 { font-size: 1.3rem; margin: 0; margin-right: auto; }
+.msg { min-height: 1.3em; font-size: .85rem; color: var(--muted); margin-bottom: 8px; }
+.msg.err { color: var(--block); }
+
+/* pieces */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 11px; }
+.card h2 { font-size: .95rem; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.card .body { padding: 14px 16px; }
+.grid { display: grid; gap: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 12px 16px; }
+.tile b { display: block; font-size: 1.7rem; line-height: 1.15; }
+.tile span { font-size: .8rem; color: var(--muted); }
+.two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .two { grid-template-columns: 1fr; } }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+tbody tr.link { cursor: pointer; } tbody tr.link:hover { background: var(--hover); }
+tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.empty { padding: 28px 16px; color: var(--muted); text-align: center; }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-weight: 700; font-size: 11.5px; letter-spacing: .02em; }
+.ALLOW, .ACTIVE, .FALSE_POSITIVE { background: var(--allow-bg); color: var(--allow); }
+.STEP_UP, .INVESTIGATING { background: var(--step-bg); color: var(--step); }
+.BLOCK, .REVOKED, .CONFIRMED_FRAUD { background: var(--block-bg); color: var(--block); }
+.OPEN { background: var(--info-bg); color: var(--info); }
+.CLOSED, .inactive { background: var(--grey-bg); color: var(--muted); }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.barrow { display: grid; grid-template-columns: minmax(0, 1fr) 46px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
+.barrow .lbl { margin-bottom: 3px; }
+.chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding-top: 8px; }
+.chart .col { flex: 1; display: flex; flex-direction: column-reverse; min-width: 4px; }
+.chart .col i { display: block; }
+.chart .a { background: var(--allow); } .chart .s { background: var(--step); } .chart .b { background: var(--block); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13.5px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.reason { padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.reason:first-child { border-top: 0; }
+.reason code { display: block; color: var(--muted); font-size: 11.5px; }
+.pts { float: right; font-weight: 700; }
+.note { padding: 10px 0; border-top: 1px solid var(--line); }
+.note small, .hist small { color: var(--muted); }
+.hist { font-size: 13px; padding: 6px 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { min-height: 30px; padding: 3px 11px; border-radius: 999px; font-size: 13px; }
+.chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.rulerow { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.rulerow small { display: block; color: var(--muted); font-size: 11.5px; }
+.rulerow input { width: 96px; text-align: right; }
+.changed input { border-color: var(--accent); outline: 1px solid var(--accent); }
+pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; font-size: 11.5px; overflow: auto; max-height: 300px; }
+.back { display: inline-block; margin-bottom: 10px; font-size: .9rem; }
+.banner { background: var(--step-bg); color: var(--step); border-radius: 9px; padding: 8px 12px; font-size: .85rem; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form id="login-form" autocomplete="on">
+    <h1>FortGuard Back Office</h1>
+    <div class="msg">Sign in to review cases and manage FortGuard.</div>
+    <label for="l-user">Username</label>
+    <input id="l-user" name="username" autocomplete="username" required>
+    <label for="l-pass">Password</label>
+    <input id="l-pass" name="password" type="password" autocomplete="current-password" required>
+    <div class="msg err" id="l-err" role="alert"></div>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <nav aria-label="Main">
+    <div class="brand">FortGuard</div>
+    <a href="#/dashboard" data-page="dashboard">Dashboard</a>
+    <a href="#/cases" data-page="cases">Cases <span class="count hidden" id="nav-open"></span></a>
+    <a href="#/decisions" data-page="decisions">Decisions</a>
+    <a href="#/devices" data-page="devices">Devices</a>
+    <a href="#/rules" data-page="rules">Rules</a>
+    <a href="#/users" data-page="users" class="admin-only">Users</a>
+    <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
+    <div class="spacer"></div>
+    <div class="who"><span id="who"></span><button type="button" id="logout">Sign out</button></div>
+  </nav>
+  <main>
+    <div class="banner hidden" id="dev-banner">Test server: attestation is simulated and data is synthetic. Not for real customers.</div>
+    <div class="msg" id="msg" role="status"></div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<script src="/web/fgcore.js"></script>
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var S = { token: null, user: null, dev: false, timer: null };
+  var STATUSES = ["OPEN", "INVESTIGATING", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
+  var STATUS_TEXT = { OPEN: "Open", INVESTIGATING: "Investigating", CONFIRMED_FRAUD: "Confirmed fraud", FALSE_POSITIVE: "False positive", CLOSED: "Closed" };
+  var ACTION_TEXT = { login: "signed in", login_failed: "failed sign-in", logout: "signed out", case_update: "updated case", note_add: "added a note",
+    device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios" };
+
+  try { S.token = sessionStorage.getItem("fg_token"); } catch (e) { /* ignore */ }
+
+  // --- helpers ----------------------------------------------------------------------------------
+  function el(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === "text") e.textContent = attrs[k];
+      else if (k === "class") e.className = attrs[k];
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    });
+    (kids || []).forEach(function (c) { if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function pill(v, text) { return el("span", { class: "pill " + v, text: text || (STATUS_TEXT[v] || v.replace(/_/g, " ")) }); }
+  function when(ms) { var d = new Date(ms); return d.toLocaleDateString() + " " + d.toLocaleTimeString(); }
+  function money(a, c) { return a == null ? "–" : (c || "") + " " + Number(a).toLocaleString(); }
+  function reasonText(code) { return (FGCore.REASONS[code] || code); }
+  function short(s, n) { return s && s.length > n ? s.slice(0, n) + "…" : (s || "–"); }
+  function say(t, err) { var m = $("msg"); m.textContent = t || ""; m.className = "msg" + (err ? " err" : ""); }
+  function can(role) { var r = ["viewer", "analyst", "admin"]; return S.user && r.indexOf(S.user.role) >= r.indexOf(role); }
+  function card(title, body, extra) { return el("section", { class: "card" }, [title ? el("h2", { text: title }, extra ? [extra] : []) : null, el("div", { class: "body" }, body)]); }
+
+  async function call(method, path, body) {
+    var opts = { method: method, headers: { "Authorization": "Bearer " + S.token } };
+    if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    var res = await fetch(path, opts);
+    var json = {}; try { json = await res.json(); } catch (e) { /* not json */ }
+    if (res.status === 401 && path !== "/v1/auth/login") { signOut(true); throw new Error("Your session ended. Sign in again."); }
+    if (!res.ok) throw new Error((json.error && json.error.message) || ("HTTP " + res.status));
+    return json;
+  }
+
+  // --- sign in / out --------------------------------------------------------------------------------
+  $("login-form").addEventListener("submit", async function (e) {
+    e.preventDefault(); $("l-err").textContent = "";
+    try {
+      var res = await fetch("/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: $("l-user").value, password: $("l-pass").value }) });
+      var json = await res.json();
+      if (!res.ok) { $("l-err").textContent = (json.error && json.error.message) || "Sign-in failed"; return; }
+      S.token = json.token; try { sessionStorage.setItem("fg_token", S.token); } catch (x) { /* ignore */ }
+      $("l-pass").value = ""; start();
+    } catch (x) { $("l-err").textContent = "Cannot reach the server."; }
+  });
+  function signOut(silent) {
+    if (!silent && S.token) fetch("/v1/auth/logout", { method: "POST", headers: { "Authorization": "Bearer " + S.token } });
+    S.token = null; S.user = null; try { sessionStorage.removeItem("fg_token"); } catch (e) { /* ignore */ }
+    clearInterval(S.timer); $("app").classList.add("hidden"); $("login").classList.remove("hidden"); $("l-user").focus();
+  }
+  $("logout").addEventListener("click", function () { signOut(false); });
+
+  async function start() {
+    if (!S.token) return signOut(true);
+    try { var me = await call("GET", "/v1/auth/me"); } catch (e) { return signOut(true); }
+    S.user = me.user; S.dev = me.dev_mode;
+    $("who").textContent = S.user.username + " · " + S.user.role;
+    document.querySelectorAll(".admin-only").forEach(function (a) { a.classList.toggle("hidden", !can("admin")); });
+    $("dev-banner").classList.toggle("hidden", !S.dev);
+    $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+    clearInterval(S.timer); S.timer = setInterval(refreshCount, 15000); refreshCount();
+    route();
+  }
+  async function refreshCount() {
+    try { var c = await call("GET", "/v1/bo/cases?limit=1"); var n = c.counts.OPEN; var b = $("nav-open"); b.textContent = n; b.classList.toggle("hidden", !n); } catch (e) { /* ignore */ }
+  }
+
+  // --- routing ---------------------------------------------------------------------------------------
+  window.addEventListener("hashchange", route);
+  function route() {
+    if (!S.user) return;
+    var parts = (location.hash.replace(/^#\//, "") || "dashboard").split("/");
+    var page = parts[0];
+    document.querySelectorAll("nav a").forEach(function (a) { a.setAttribute("aria-current", a.dataset.page === page ? "page" : "false"); });
+    say("");
+    var v = $("view"); v.innerHTML = "";
+    var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
+      devices: devices, rules: rules, users: users, audit: audit };
+    (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
+    window.scrollTo(0, 0);
+  }
+  function head(v, title, extra) { v.appendChild(el("div", { class: "pagehead" }, [el("h1", { text: title })].concat(extra || []))); }
+
+  // --- dashboard -------------------------------------------------------------------------------------
+  async function dashboard(v) {
+    var sim = S.dev && can("analyst") ? el("button", { type: "button", text: "Run sample scenarios", onclick: simulate }) : null;
+    head(v, "Dashboard", [sim]);
+    var o = await call("GET", "/v1/bo/overview");
+    var t = o.last_24h;
+    v.appendChild(el("div", { class: "tiles" }, [
+      tile(t.total, "Decisions, last 24 h"), tile(t.ALLOW, "Allowed"), tile(t.STEP_UP, "Stepped up"), tile(t.BLOCK, "Blocked"),
+      tile(o.cases.OPEN + o.cases.INVESTIGATING, "Cases to work"), tile(o.cases.CONFIRMED_FRAUD, "Confirmed fraud"),
+      tile(o.devices.total, "Devices (" + o.devices.revoked + " revoked)")
+    ]));
+    var max = Math.max.apply(null, [1].concat(o.hourly.map(function (h) { return h.ALLOW + h.STEP_UP + h.BLOCK; })));
+    var chart = el("div", { class: "chart", role: "img", "aria-label": "Decisions per hour, last 24 hours" },
+      o.hourly.map(function (h) {
+        var col = el("div", { class: "col", title: new Date(h.hour_ms).toLocaleTimeString() + ": " + h.ALLOW + " allow, " + h.STEP_UP + " step-up, " + h.BLOCK + " block" });
+        [["a", h.ALLOW], ["s", h.STEP_UP], ["b", h.BLOCK]].forEach(function (p) { var i = el("i", { class: p[0] }); i.style.height = (p[1] / max * 130) + "px"; col.appendChild(i); });
+        return col;
+      }));
+    var legend = el("div", { class: "legend" }, [el("span", {}, [el("i", { class: "a", style: "background:var(--allow)" }), "Allow"]),
+      el("span", {}, [el("i", { style: "background:var(--step)" }), "Step-up"]), el("span", {}, [el("i", { style: "background:var(--block)" }), "Block"])]);
+    var topMax = Math.max.apply(null, [1].concat(o.top_reasons.map(function (r) { return r[1]; })));
+    var reasons = o.top_reasons.length ? o.top_reasons.map(function (r) {
+      var bar = el("div", { class: "bar" }, [el("i", { style: "width:" + (r[1] / topMax * 100) + "%" })]);
+      return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: reasonText(r[0]) }), bar]), el("b", { text: String(r[1]) })]);
+    }) : [el("div", { class: "empty", text: "No decisions yet." })];
+    v.appendChild(el("div", { class: "two" }, [
+      card("Decisions per hour (last 24 h)", o.hourly.length ? [chart, legend] : [el("div", { class: "empty", text: "No decisions yet." + (S.dev ? " Use “Run sample scenarios” or the demo apps." : "") })]),
+      card("Most common reasons", reasons)
+    ]));
+  }
+  function tile(n, label) { return el("div", { class: "tile" }, [el("b", { text: String(n) }), el("span", { text: label })]); }
+  async function simulate(e) {
+    e.target.disabled = true; say("Running sample scenarios…");
+    try { var r = await call("POST", "/v1/bo/dev/simulate"); say("Added " + r.results.length + " synthetic sessions."); route(); refreshCount(); }
+    catch (x) { say(x.message, true); } finally { e.target.disabled = false; }
+  }
+
+  // --- cases -------------------------------------------------------------------------------------------
+  var caseFilter = { status: "OPEN", q: "" };
+  async function cases(v) {
+    head(v, "Cases");
+    var chips = el("div", { class: "chips", role: "group", "aria-label": "Filter by status" });
+    var search = el("input", { type: "search", placeholder: "Search session, user or device", value: caseFilter.q, "aria-label": "Search cases" });
+    search.addEventListener("change", function () { caseFilter.q = search.value; route(); });
+    v.appendChild(el("div", { class: "toolbar" }, [chips, search]));
+    var q = "/v1/bo/cases?limit=300" + (caseFilter.status ? "&status=" + caseFilter.status : "") + (caseFilter.q ? "&q=" + encodeURIComponent(caseFilter.q) : "");
+    var data = await call("GET", q);
+    [["", "All"]].concat(STATUSES.map(function (s) { return [s, STATUS_TEXT[s]]; })).forEach(function (p) {
+      var n = p[0] ? data.counts[p[0]] : STATUSES.reduce(function (a, s) { return a + data.counts[s]; }, 0);
+      chips.appendChild(el("button", { type: "button", "aria-pressed": String(caseFilter.status === p[0]), text: p[1] + " (" + n + ")",
+        onclick: function () { caseFilter.status = p[0]; route(); } }));
+    });
+    var rows = data.cases.map(function (c) {
+      var tr = el("tr", { class: "link", tabindex: "0" }, [
+        el("td", { text: "#" + c.id }), el("td", {}, [pill(c.status)]), el("td", {}, [pill(c.risk_level)]), el("td", { text: String(c.risk_score) }),
+        el("td", { text: c.user_id || "–" }), el("td", { text: money(c.amount, c.currency) }), el("td", { text: c.top_reason ? reasonText(c.top_reason) : "–" }),
+        el("td", { text: c.assignee || "unassigned" }), el("td", { text: when(c.updated_ms) })]);
+      var go = function () { location.hash = "#/cases/" + c.id; };
+      tr.addEventListener("click", go); tr.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+      return tr;
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, ["Case", "Status", "Decision", "Score", "User", "Amount", "Top reason", "Assignee", "Updated"].map(function (h) { return el("th", { text: h }); }))]),
+      el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No cases here. Step-up and block decisions open cases automatically." })]));
+  }
+
+  async function caseDetail(v, id) {
+    v.appendChild(el("a", { href: "#/cases", class: "back", text: "← All cases" }));
+    var c = await call("GET", "/v1/bo/cases/" + id);
+    var d = c.decision;
+    head(v, "Case #" + c.id, [pill(c.status), pill(c.risk_level, c.risk_level.replace("_", " ") + " · " + c.risk_score)]);
+
+    var why = d.score_breakdown.length ? d.score_breakdown.map(function (item) {
+      return el("div", { class: "reason" }, [el("span", { class: "pts", text: "+" + item.points }), el("div", { text: reasonText(item.reason) }), el("code", { text: item.reason })]);
+    }) : [el("div", { class: "empty", text: "No risk signals fired." })];
+    var td = d.threat_details || {};
+    var facts = el("dl", { class: "kv" });
+    [["Recommended action", FGCore.ACTIONS[d.action_recommended] || d.action_recommended], ["User", c.user_id], ["Session", c.session_id],
+     ["Device", (c.device_guid || "–") + (c.device ? " · " + c.device.platform + " · attestation " + c.device.integrity_level + " · " + c.device.status.toLowerCase() : "")],
+     ["Amount", money(d.amount, d.currency)], ["Beneficiary", d.beneficiary_last4 ? "…" + d.beneficiary_last4 + (d.is_new_beneficiary ? " (new)" : "") : "–"],
+     ["Bot probability", Math.round((td.bot_probability || 0) * 100) + "%"], ["Coercion probability", Math.round((td.coercion_scam_probability || 0) * 100) + "%"],
+     ["Remote tool", td.rat_detected ? "yes" : "no"], ["Signals used", d.signals_used], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
+      .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
+
+    var left = [card("Why FortGuard flagged it", why), card("Details", [facts])];
+    if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
+      return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);
+    }))])]));
+
+    // work panel
+    var work = [];
+    if (can("analyst")) {
+      var status = el("select", { "aria-label": "Status" }, STATUSES.map(function (s) { var o = el("option", { value: s, text: STATUS_TEXT[s] }); if (s === c.status) o.selected = true; return o; }));
+      var assignee = el("select", { "aria-label": "Assignee" }, [el("option", { value: "", text: "Unassigned" })]);
+      try {
+        var people = can("admin") ? (await call("GET", "/v1/bo/users")).users.filter(function (u) { return u.active && u.role !== "viewer"; }).map(function (u) { return u.username; }) : [S.user.username];
+        if (c.assignee && people.indexOf(c.assignee) < 0) people.push(c.assignee);
+        people.forEach(function (u) { var o = el("option", { value: u, text: u }); if (u === c.assignee) o.selected = true; assignee.appendChild(o); });
+      } catch (e) { /* ignore */ }
+      var save = el("button", { class: "primary", type: "button", text: "Save", onclick: async function () {
+        try { await call("POST", "/v1/bo/cases/" + c.id, { status: status.value, assignee: assignee.value || null }); say("Case updated."); route(); refreshCount(); } catch (e) { say(e.message, true); }
+      } });
+      var mine = el("button", { type: "button", text: "Assign to me", onclick: async function () {
+        try { await call("POST", "/v1/bo/cases/" + c.id, { assignee: S.user.username, status: c.status === "OPEN" ? "INVESTIGATING" : c.status }); route(); refreshCount(); } catch (e) { say(e.message, true); }
+      } });
+      work.push(card("Work this case", [el("div", { class: "toolbar" }, [status, assignee]), el("div", { class: "toolbar" }, [save, mine])]));
+      if (c.device && c.device.status === "ACTIVE") work.push(card("Device", [el("p", { text: "Revoking stops this device sending data or enrolling again." }),
+        el("button", { class: "danger", type: "button", text: "Revoke device", onclick: async function () {
+          if (!confirm("Revoke device " + c.device_guid + "?")) return;
+          try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(c.device_guid) + "/revoke"); say("Device revoked."); route(); } catch (e) { say(e.message, true); }
+        } })]));
+    }
+    var notes = c.notes.map(function (n) { return el("div", { class: "note" }, [el("small", { text: n.author + " · " + when(n.created_ms) }), el("div", { text: n.text })]); });
+    if (!notes.length) notes.push(el("div", { class: "empty", text: "No notes yet." }));
+    if (can("analyst")) {
+      var ta = el("textarea", { "aria-label": "New note", placeholder: "What did you check or decide?", maxlength: "2000" });
+      notes.push(el("div", { style: "margin-top:10px" }, [ta, el("div", { class: "toolbar", style: "margin-top:8px" }, [el("button", { class: "primary", type: "button", text: "Add note", onclick: async function () {
+        if (!ta.value.trim()) return;
+        try { await call("POST", "/v1/bo/cases/" + c.id + "/notes", { text: ta.value }); route(); } catch (e) { say(e.message, true); }
+      } })])]));
+    }
+    work.push(card("Notes", notes));
+    var hist = c.history.map(function (h) {
+      var what = ACTION_TEXT[h.action] || h.action;
+      if (h.action === "case_update" && h.detail) what += ": " + Object.keys(h.detail.after).map(function (k) { return k + " → " + (STATUS_TEXT[h.detail.after[k]] || h.detail.after[k] || "unassigned"); }).join(", ");
+      return el("div", { class: "hist" }, [el("small", { text: when(h.time_ms) + " · " }), h.actor + " " + what]);
+    });
+    work.push(card("History", hist.length ? hist : [el("div", { class: "empty", text: "No changes yet." })]));
+    v.appendChild(el("div", { class: "two" }, [el("div", { class: "grid" }, left), el("div", { class: "grid" }, work)]));
+  }
+
+  // --- decisions --------------------------------------------------------------------------------------
+  var decisionLevel = "";
+  async function decisions(v) {
+    head(v, "Decisions");
+    var chips = el("div", { class: "chips" });
+    [["", "All"], ["ALLOW", "Allow"], ["STEP_UP", "Step-up"], ["BLOCK", "Block"]].forEach(function (p) {
+      chips.appendChild(el("button", { type: "button", "aria-pressed": String(decisionLevel === p[0]), text: p[1], onclick: function () { decisionLevel = p[0]; route(); } }));
+    });
+    v.appendChild(el("div", { class: "toolbar" }, [chips]));
+    var data = await call("GET", "/v1/bo/decisions?limit=300" + (decisionLevel ? "&level=" + decisionLevel : ""));
+    var rows = data.decisions.map(function (d) {
+      return el("tr", {}, [el("td", { text: when(d.time_ms) }), el("td", { text: short(d.session_id, 16) }), el("td", { text: d.user_id }), el("td", { text: d.event_type.replace(/_/g, " ").toLowerCase() }),
+        el("td", { text: money(d.amount, d.currency) }), el("td", { text: String(d.risk_score) }), el("td", {}, [pill(d.risk_level)]),
+        el("td", { text: d.score_breakdown.length ? reasonText(d.score_breakdown[0].reason) : "–" }), el("td", { text: d.latency_ms + " ms" })]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Time", "Session", "User", "Event", "Amount", "Score", "Decision", "Top reason", "Scoring"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+      rows.length ? null : el("div", { class: "empty", text: "No decisions yet." })]));
+  }
+
+  // --- devices -----------------------------------------------------------------------------------------
+  async function devices(v) {
+    head(v, "Devices");
+    var data = await call("GET", "/v1/bo/devices");
+    var rows = data.devices.map(function (d) {
+      var action = can("analyst") && d.status === "ACTIVE" ? el("button", { class: "danger", type: "button", text: "Revoke", onclick: async function () {
+        if (!confirm("Revoke " + d.device_guid + "?")) return;
+        try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(d.device_guid) + "/revoke"); route(); } catch (e) { say(e.message, true); }
+      } }) : null;
+      return el("tr", {}, [el("td", { text: d.device_guid }), el("td", { text: d.platform }), el("td", { text: d.app_id }), el("td", { text: d.integrity_level }),
+        el("td", {}, [pill(d.status)]), el("td", { text: "v" + d.key_version + " · " + d.key_sha256.slice(0, 10) }), el("td", { text: when(d.enrolled_at_ms) }), el("td", {}, [action])]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Device", "Platform", "App", "Attestation", "Status", "Key", "Enrolled", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+      rows.length ? null : el("div", { class: "empty", text: "No devices enrolled yet. Open a demo app to enroll one." })]));
+  }
+
+  // --- rules -----------------------------------------------------------------------------------------------
+  async function rules(v) {
+    var r = await call("GET", "/v1/bo/rules");
+    var admin = can("admin");
+    var inputs = {};
+    function row(key, label, value, def, min, max) {
+      var inp = el("input", { type: "number", min: String(min), max: String(max), step: "1", value: String(value), "aria-label": label });
+      if (!admin) inp.disabled = true;
+      var wrap = el("div", { class: "rulerow" + (value !== def ? " changed" : "") }, [el("div", {}, [label, el("small", { text: key + (value !== def ? " · default " + def : "") })]), inp]);
+      inp.addEventListener("input", function () { wrap.classList.toggle("changed", Number(inp.value) !== def); });
+      inputs[key] = inp; return wrap;
+    }
+    var save = admin ? el("button", { class: "primary", type: "button", text: "Save changes", onclick: async function () {
+      var weights = {}, bands = {};
+      Object.keys(r.weights).forEach(function (k) { weights[k] = parseInt(inputs[k].value, 10); });
+      bands.step_up_from = parseInt(inputs.step_up_from.value, 10); bands.block_from = parseInt(inputs.block_from.value, 10);
+      try { await call("PUT", "/v1/bo/rules", { weights: weights, bands: bands }); say("Rules saved. They apply to the next decision."); route(); } catch (e) { say(e.message, true); }
+    } }) : null;
+    var reset = admin ? el("button", { type: "button", text: "Reset to defaults", onclick: async function () {
+      if (!confirm("Put every rule and band back to its default?")) return;
+      try { await call("PUT", "/v1/bo/rules", { weights: r.defaults.weights, bands: r.defaults.bands["default"] }); say("Defaults restored."); route(); } catch (e) { say(e.message, true); }
+    } }) : null;
+    head(v, "Rules", [reset, save]);
+    if (!admin) say("Only admins can change rules.");
+    var bandDef = r.defaults.bands["default"];
+    v.appendChild(el("div", { class: "two" }, [
+      card("Points per signal", Object.keys(r.weights).sort().map(function (k) { return row(k, reasonText(k), r.weights[k], r.defaults.weights[k], 0, r.score_max); })),
+      card("Decision bands", [el("p", { class: "msg", text: "A score at or above “step-up from” asks for a second factor; at or above “block from” the session is ended and a case opened." }),
+        row("step_up_from", "Step-up from", r.bands.step_up_from, bandDef.step_up_from, 1, r.score_max), row("block_from", "Block from", r.bands.block_from, bandDef.block_from, 1, r.score_max),
+        el("p", { class: "msg", text: "Every change is recorded in the audit log with the old and new values." })])
+    ]));
+  }
+
+  // --- users ---------------------------------------------------------------------------------------------------
+  async function users(v) {
+    head(v, "Users");
+    var data = await call("GET", "/v1/bo/users");
+    var name = el("input", { placeholder: "username", "aria-label": "Username", autocomplete: "off" });
+    var pw = el("input", { type: "password", placeholder: "password (10+ characters)", "aria-label": "Password", autocomplete: "new-password" });
+    var role = el("select", { "aria-label": "Role" }, data.roles.map(function (r) { return el("option", { value: r, text: r }); }));
+    role.value = "analyst";
+    v.appendChild(card("Add a user", [el("div", { class: "toolbar" }, [name, pw, role, el("button", { class: "primary", type: "button", text: "Add", onclick: async function () {
+      try { await call("POST", "/v1/bo/users", { username: name.value, password: pw.value, role: role.value }); say("User added."); route(); } catch (e) { say(e.message, true); }
+    } })]), el("p", { class: "msg", text: "Viewer: read only. Analyst: work cases and revoke devices. Admin: also rules, users and the audit log." })]));
+    var rows = data.users.map(function (u) {
+      var sel = el("select", { "aria-label": "Role for " + u.username }, data.roles.map(function (r) { var o = el("option", { value: r, text: r }); if (r === u.role) o.selected = true; return o; }));
+      sel.addEventListener("change", async function () { try { await call("POST", "/v1/bo/users/" + u.username, { role: sel.value }); say("Role changed."); } catch (e) { say(e.message, true); route(); } });
+      var toggle = el("button", { type: "button", text: u.active ? "Deactivate" : "Activate", onclick: async function () {
+        try { await call("POST", "/v1/bo/users/" + u.username, { active: !u.active }); route(); } catch (e) { say(e.message, true); }
+      } });
+      var reset = el("button", { type: "button", text: "Set password", onclick: async function () {
+        var p = prompt("New password for " + u.username + " (10+ characters):"); if (!p) return;
+        try { await call("POST", "/v1/bo/users/" + u.username, { password: p }); say("Password changed. " + u.username + " must sign in again."); } catch (e) { say(e.message, true); }
+      } });
+      return el("tr", {}, [el("td", { text: u.username }), el("td", {}, [sel]), el("td", {}, [pill(u.active ? "ACTIVE" : "inactive", u.active ? "active" : "inactive")]), el("td", { text: when(u.created_ms) }), el("td", {}, [reset, " ", toggle])]);
+    });
+    v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["User", "Role", "Status", "Created", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)])]));
+  }
+
+  // --- audit -------------------------------------------------------------------------------------------------------
+  async function audit(v) {
+    head(v, "Audit log");
+    var data = await call("GET", "/v1/bo/audit?limit=500");
+    var rows = data.audit.map(function (a) {
+      return el("tr", {}, [el("td", { text: when(a.time_ms) }), el("td", { text: a.actor }), el("td", { text: ACTION_TEXT[a.action] || a.action }), el("td", { text: a.target || "–" }),
+        el("td", { style: "white-space:normal;min-width:240px" }, [a.detail ? el("code", { text: JSON.stringify(a.detail) }) : "–"])]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["When", "Who", "Action", "Target", "Detail"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)])]));
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

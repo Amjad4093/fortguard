@@ -1,0 +1,12 @@
+{
+  "event_type": "FUNDS_TRANSFER",
+  "request_id": "req_mflssqldrm18",
+  "session_id": "sess_8oyelwnme9o2",
+  "transaction_details": {
+    "amount": 250000.0,
+    "beneficiary_account": "PK36EXMP00992201029381",
+    "currency": "PKR",
+    "is_new_beneficiary": true
+  },
+  "user_id": "usr_i92bjh90"
+}

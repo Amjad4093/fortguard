@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEMO ONLY: allows plain HTTP so the app can reach a test server on the office Wi-Fi
+  (python -m fortguard.app dev host 0.0.0.0). A production app must use HTTPS only,
+  with certificate pinning to the FortGuard endpoint.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

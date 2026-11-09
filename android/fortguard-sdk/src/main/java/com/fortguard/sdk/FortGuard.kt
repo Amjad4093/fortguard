@@ -1,0 +1,212 @@
+package com.fortguard.sdk
+
+import android.app.Activity
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.EditText
+import com.fortguard.sdk.core.ApiClient
+import com.fortguard.sdk.core.AttestationProvider
+import com.fortguard.sdk.core.Counts
+import com.fortguard.sdk.core.DevAttestationProvider
+import com.fortguard.sdk.core.EventBuffer
+import com.fortguard.sdk.core.Field
+import com.fortguard.sdk.core.FortGuardEngine
+import com.fortguard.sdk.core.Ids
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+
+/**
+ * FortGuard SDK for Android.
+ *
+ * ```
+ * // Application.onCreate or the first Activity
+ * FortGuard.init(context, FortGuard.Config(baseUrl = "https://risk.example.com", appId = BuildConfig.APPLICATION_ID))
+ *
+ * // each protected screen
+ * override fun onResume() { super.onResume(); FortGuard.attach(this) }
+ * override fun onPause()  { FortGuard.detach(this); super.onPause() }
+ * FortGuard.watch(beneficiaryInput, Field.BENEFICIARY_ACCOUNT)
+ *
+ * // before the payment: send what is buffered, then give FortGuard.sessionId to your backend,
+ * // which calls POST /v1/risk/evaluate with its own API key.
+ * FortGuard.submit { outcome -> backend.pay(sessionId = FortGuard.sessionId) }
+ * ```
+ *
+ * The SDK never reads what the user types. It records touch, the timing of edits, motion sensors and
+ * device checks, signs each batch with a hardware key and sends it every few seconds.
+ */
+object FortGuard {
+
+    data class Config(
+        val baseUrl: String,
+        val appId: String,
+        /** DEVELOPMENT ONLY: get simulated attestation from a server running with --dev. */
+        val devAttestation: Boolean = true,
+        /** Attestation level the dev server should grant (STRONG, DEVICE, BASIC). Testing only. */
+        val devAttestationLevel: () -> String = { "STRONG" },
+        /** Lets a test app force environment flags. Never enable in a production build. */
+        val allowDebugOverrides: Boolean = false,
+        val flushIntervalMs: Long = 5_000,
+        /** Production attestation (Play Integrity) goes here when it is built. */
+        val attestationProvider: AttestationProvider? = null,
+    )
+
+    data class Status(
+        val deviceGuid: String?,
+        val sessionId: String?,
+        val enrolledLevel: String?,
+        val counts: Counts,
+        val environment: Map<String, Any?>,
+        val motionSensors: String,
+        val lastMessage: String,
+    )
+
+    private val worker = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "fortguard").apply { isDaemon = true } }
+    private val main = Handler(Looper.getMainLooper())
+    private val buffer = EventBuffer()
+
+    @Volatile private var engine: FortGuardEngine? = null
+    @Volatile private var config: Config? = null
+    @Volatile private var lastMessage = "not started"
+    private var env: EnvironmentChecks? = null
+    private var motion: MotionCapture? = null
+    private var timer: ScheduledFuture<*>? = null
+    private val attached = HashMap<Activity, TouchCallback>()
+
+    /** Forced environment flags for testing. Applied only when Config.allowDebugOverrides is true. */
+    val debugOverrides: MutableMap<String, Boolean> = java.util.concurrent.ConcurrentHashMap()
+
+    val sessionId: String? get() = engine?.sessionId
+
+    /** Safe to call again, for example after changing the server address. */
+    fun init(context: Context, config: Config, log: (String) -> Unit = {}) {
+        val app = context.applicationContext
+        this.config = config
+        val checks = EnvironmentChecks(app).also { env = it }
+        if (motion == null) motion = MotionCapture(app, buffer)
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val guid = prefs.getString(KEY_GUID, null) ?: Ids.random("dev_", 12).also { prefs.edit().putString(KEY_GUID, it).apply() }
+        timer?.cancel(false)
+        worker.execute {
+            try {
+                val key = AndroidKeys.loadOrCreate() // may take a moment on StrongBox phones
+                val api = ApiClient(config.baseUrl)
+                val attestation = config.attestationProvider
+                    ?: if (config.devAttestation) DevAttestationProvider(api, config.devAttestationLevel)
+                    else AttestationProvider { throw IllegalStateException("no attestation provider configured") }
+                engine = FortGuardEngine(
+                    api = api, appId = config.appId, deviceGuid = guid, key = key, attestation = attestation,
+                    environment = { environmentSnapshot(checks) }, platform = "Android",
+                    log = { m -> lastMessage = m; log(m) }, buffer = buffer,
+                )
+                engine!!.consentBehavioral = buffer.enabled // consent may have been set before the engine existed
+                lastMessage = "ready"
+                val e = engine!!.enroll()
+                lastMessage = e.message
+                log(e.message)
+            } catch (t: Throwable) {
+                lastMessage = "init failed: ${t.message}"
+                log(lastMessage)
+            }
+        }
+        timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun environmentSnapshot(checks: EnvironmentChecks): Map<String, Any?> {
+        val base = checks.snapshot()
+        return if (config?.allowDebugOverrides == true && debugOverrides.isNotEmpty()) {
+            LinkedHashMap(base).apply { debugOverrides.forEach { (k, v) -> if (containsKey(k)) put(k, v || (get(k) == true)) } }
+        } else base
+    }
+
+    /** Start capturing on a screen. Call from onResume. */
+    fun attach(activity: Activity) {
+        val window = activity.window
+        if (attached.containsKey(activity)) return
+        val cb = TouchCallback(window.callback, buffer)
+        window.callback = cb
+        attached[activity] = cb
+        env?.onAttach(activity)
+        motion?.start()
+    }
+
+    /** Stop capturing on a screen and send what is buffered. Call from onPause. */
+    fun detach(activity: Activity) {
+        attached.remove(activity)?.let { cb -> if (activity.window.callback === cb) activity.window.callback = cb.base }
+        env?.onDetach(activity)
+        if (attached.isEmpty()) motion?.stop()
+        flush()
+    }
+
+    /** Record typing rhythm, focus and paste for one input. Never reads its text. */
+    fun watch(editText: EditText, field: Field) = watchField(editText, field, buffer)
+
+    /** User consent for behavioral capture. When false nothing behavioral is collected or sent. */
+    fun setConsent(granted: Boolean) {
+        buffer.enabled = granted
+        engine?.consentBehavioral = granted
+        if (!granted) buffer.clear()
+    }
+
+    /** Send what is buffered now, in the background. */
+    fun flush(callback: ((FortGuardEngine.Outcome) -> Unit)? = null) {
+        worker.execute {
+            val o = engine?.flush(force = true) ?: FortGuardEngine.Outcome(false, "SDK not ready: $lastMessage")
+            lastMessage = o.message
+            callback?.let { cb -> main.post { cb(o) } }
+        }
+    }
+
+    /** Mark the user pressing the confirm button, then send everything. Call before your backend asks for a decision. */
+    fun submit(callback: (FortGuardEngine.Outcome) -> Unit) {
+        buffer.ui("SUBMIT", Field.OTHER, System.currentTimeMillis())
+        flush(callback)
+    }
+
+    /** Re-enroll, for example after changing the test attestation level. */
+    fun reenroll(callback: (FortGuardEngine.Outcome) -> Unit) {
+        worker.execute {
+            val o = engine?.enroll(force = true) ?: FortGuardEngine.Outcome(false, "SDK not ready: $lastMessage")
+            lastMessage = o.message
+            main.post { callback(o) }
+        }
+    }
+
+    fun newSession(): String? {
+        val id = engine?.newSession()
+        buffer.clear()
+        return id
+    }
+
+    /** Forget this device: deletes the hardware key and the device ID. The next init enrolls a new device. */
+    fun resetDevice(context: Context) {
+        timer?.cancel(false)
+        engine = null
+        AndroidKeys.delete()
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_GUID).apply()
+        buffer.clear()
+        lastMessage = "device reset"
+    }
+
+    fun lastBatchJson(): String? = engine?.lastBatchJson
+
+    fun status(): Status {
+        val m = motion
+        val sensors = when {
+            m == null -> "not started"
+            !m.hasAccelerometer -> "no accelerometer"
+            m.running -> "on" + if (m.hasGyroscope) "" else " (no gyroscope)"
+            else -> "off (no screen attached)"
+        }
+        return Status(
+            deviceGuid = engine?.deviceGuid, sessionId = engine?.sessionId, enrolledLevel = engine?.enrolledLevel,
+            counts = buffer.counts(), environment = env?.let { environmentSnapshot(it) } ?: emptyMap(),
+            motionSensors = sensors, lastMessage = lastMessage,
+        )
+    }
+
+    private const val PREFS = "fortguard"
+    private const val KEY_GUID = "device_guid"
+}

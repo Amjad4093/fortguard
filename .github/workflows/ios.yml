@@ -1,0 +1,71 @@
+name: ios
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Show Xcode
+        run: xcodebuild -version && swift --version
+
+      - name: Start a FortGuard dev server for the live SDK tests
+        run: |
+          pip install -r requirements.txt
+          nohup python -m fortguard.app --dev --port 8080 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/healthz && break; sleep 1; done
+
+      - name: SDK unit tests and live-server tests (macOS)
+        working-directory: ios/FortGuardSDK
+        env:
+          FORTGUARD_TEST_SERVER: http://127.0.0.1:8080
+        run: swift test
+
+      - name: Generate the demo app's Xcode project
+        working-directory: ios/DemoApp
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build the demo app for the iOS Simulator
+        working-directory: ios/DemoApp
+        run: |
+          xcodebuild -project FortGuardDemo.xcodeproj -scheme FortGuardDemo \
+            -destination 'generic/platform=iOS Simulator' -configuration Debug \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -n 40
+
+      - name: Run the demo app on a simulated iPhone and screenshot it
+        working-directory: ios/DemoApp
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build/Build/Products -name "FortGuardDemo.app" -type d | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" com.example.mobilebank -fgServer http://127.0.0.1:8080 -fgAutoTest YES
+          sleep 25
+          xcrun simctl io "$UDID" screenshot ../../ios-simulator.png
+          (cd build/Build/Products && zip -qr ../../../../../FortGuardDemo-simulator.zip Debug-iphonesimulator/FortGuardDemo.app)
+
+      - name: The simulator run reached the server and got a decision
+        run: |
+          grep -c "POST /v1/risk/evaluate" server.log
+          grep "POST /v1/risk/evaluate" server.log | grep -q " 200 "
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-results
+          path: |
+            ios-simulator.png
+            FortGuardDemo-simulator.zip
+            server.log
