@@ -70,7 +70,7 @@ def _behavioral_reasons(feats, sensitive):
     return found
 
 
-def score_session(session, event_type, tx):
+def score_session(session, event_type, tx, baselines=None, user_id=None):
     env = session.env
     sensitive = event_type in config.SENSITIVE_EVENTS
     tx = tx or {}
@@ -108,6 +108,12 @@ def score_session(session, event_type, tx):
             feats = compute_features(session)
             reasons.extend(_behavioral_reasons(feats, sensitive))
 
+    baseline = None
+    if baselines is not None and user_id is not None and feats is not None:
+        baseline, anomalous = baselines.assess(user_id, feats)
+        if anomalous:
+            reasons.append("REASON_BEHAVIORAL_ANOMALY_HIGH")
+
     if (
         sensitive
         and env.get("active_call")
@@ -138,11 +144,47 @@ def score_session(session, event_type, tx):
             "bot_probability": share(BOT_REASONS, 500.0),
             "rat_detected": "REASON_REMOTE_ACCESS_TOOL_ACTIVE" in reasons,
             "coercion_scam_probability": share(COERCION_REASONS, 700.0),
-            "user_biometric_match_score": None,
+            "user_biometric_match_score": baseline["match_score"] if baseline else None,
         },
+        "baseline": baseline or {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
+                                 "match_score": None, "match_score_preview": None, "least_typical_features": []},
         "score_breakdown": breakdown,
         "signals_used": "ENVIRONMENT_AND_BEHAVIOR" if feats is not None else "ENVIRONMENT_ONLY",
         "scoring_mode": "RULES_ONLY",
         "model_version": config.MODEL_VERSION,
         "degraded": False,
+        "_features": feats,
+    }
+
+
+DEGRADED_REASONS = ("REASON_DEGRADED_NO_TELEMETRY", "REASON_DEGRADED_SCORING_ERROR")
+
+
+def degraded_decision(event_type, tx, reason):
+    """Answer from the transaction alone when behavior cannot be scored (PRD fail policy).
+
+    A new payee or a large amount steps up; everything else is allowed and logged. Never a BLOCK:
+    blocking a customer because FortGuard had a problem would be worse than asking for a second factor.
+    """
+    assert reason in DEGRADED_REASONS
+    tx = tx or {}
+    sensitive = event_type in config.SENSITIVE_EVENTS
+    amount = tx.get("amount") or 0
+    risky = sensitive and (bool(tx.get("is_new_beneficiary")) or amount >= config.DEGRADED_STEP_UP_AMOUNT)
+    score = config.bands_for(event_type)["step_up_from"] if risky else 0
+    level = level_for(score, event_type)
+    return {
+        "risk_score": score,
+        "risk_level": level,
+        "action_recommended": config.ACTIONS[level],
+        "reason_codes": [reason],
+        "threat_details": {"bot_probability": 0.0, "rat_detected": False, "coercion_scam_probability": 0.0,
+                           "user_biometric_match_score": None},
+        "score_breakdown": [{"reason": reason, "points": score}],
+        "baseline": {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
+                     "match_score": None, "match_score_preview": None, "least_typical_features": []},
+        "signals_used": "TRANSACTION_ONLY",
+        "scoring_mode": "DEGRADED",
+        "model_version": config.MODEL_VERSION,
+        "degraded": True,
     }

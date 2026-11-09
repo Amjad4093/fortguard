@@ -24,9 +24,10 @@ from .attestation import (
     DEV_AUTHORITY, AttestationError, AttestationNotConfigured, SimulatedVerifier,
 )
 from . import admin, backoffice
+from .baseline import Baselines
 from .devices import ACTIVE, DeviceRegistry
-from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_telemetry
-from .scoring import score_session
+from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_feedback, validate_telemetry
+from .scoring import degraded_decision, score_session
 from .signing import key_sha256, load_public_key, verify_payload
 from .store import DeviceMismatch, ReplayDetected, SessionStore
 
@@ -36,6 +37,16 @@ DEV_ADMIN_PASSWORD = "fortguard-admin-dev"
 
 def _error(status, code, message):
     return jsonify({"error": {"code": code, "message": message}}), status
+
+
+class _NoSession:
+    """Stands in for a session with no telemetry when answering in degraded mode."""
+
+    device_guid = None
+    integrity = None
+
+    def __init__(self, user_id):
+        self.user_id = user_id
 
 
 def create_app(api_key=None, clock=time.time, store=None, registry=None, verifier=None,
@@ -76,6 +87,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
     if bo.ensure_admin(password):
         app.fortguard_first_admin_password = password if generated or password == DEV_ADMIN_PASSWORD else None
     app.fortguard_backoffice = bo
+    baselines = Baselines(bo)
+    app.fortguard_baselines = baselines
     idempotent = OrderedDict()
 
     def read_json():
@@ -190,23 +203,47 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
             return jsonify(cached_body), cached_status
 
         session = store.get(body["session_id"])
+        started = time.perf_counter()
         if session is None:
-            return _error(404, "unknown_session", "no telemetry has been received for this session")
-        with store.lock:
-            if session.user_id not in (None, body["user_id"]):
-                return _error(409, "session_user_mismatch", "session was evaluated for another user")
-            session.user_id = body["user_id"]
-            started = time.perf_counter()
-            result = score_session(session, body["event_type"], body.get("transaction_details"))
+            if not body.get("allow_degraded"):
+                return _error(404, "unknown_session", "no telemetry has been received for this session")
+            # PRD fail policy: answer from the transaction alone, clearly marked as degraded.
+            result = degraded_decision(body["event_type"], body.get("transaction_details"), "REASON_DEGRADED_NO_TELEMETRY")
+            session = _NoSession(body["user_id"])
+        else:
+            with store.lock:
+                if session.user_id not in (None, body["user_id"]):
+                    return _error(409, "session_user_mismatch", "session was evaluated for another user")
+                session.user_id = body["user_id"]
+                try:
+                    result = score_session(session, body["event_type"], body.get("transaction_details"),
+                                           baselines=baselines, user_id=body["user_id"])
+                except Exception:
+                    if not body.get("allow_degraded"):
+                        raise
+                    app.logger.exception("scoring failed; answering in degraded mode")
+                    result = degraded_decision(body["event_type"], body.get("transaction_details"),
+                                               "REASON_DEGRADED_SCORING_ERROR")
+        feats = result.pop("_features", None)
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
         bo.record_decision(decisions.record(body, session, result, clock()))
+        if feats is not None and result["risk_level"] == "ALLOW":
+            baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))
 
         if request_id:
             idempotent[request_id] = (result, 200)
             while len(idempotent) > config.MAX_IDEMPOTENCY_ENTRIES:
                 idempotent.popitem(last=False)
         return jsonify(result), 200
+
+    @app.post("/v1/feedback")
+    def feedback():
+        if request.headers.get("X-API-Key") != api_key:
+            return _error(401, "unauthorized", "missing or wrong X-API-Key")
+        body = validate_feedback(read_json())
+        out = bo.apply_feedback(body["session_id"], body["label"], body.get("source"), body.get("note"), baselines)
+        return jsonify(out), 201
 
     admin.register(app, api_key=api_key, store=store, registry=registry, decisions=decisions,
                    clock=clock, dev_mode=dev_mode)

@@ -59,6 +59,7 @@ class DecisionLog:
             "device_integrity": session.integrity,
             "model_version": result["model_version"],
             "latency_ms": result.get("latency_ms"),
+            "baseline": result.get("baseline"),
         }
         with self._lock:
             self._items.appendleft(entry)

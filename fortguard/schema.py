@@ -203,7 +203,7 @@ def validate_enroll(p):
     return p
 
 
-EVAL_ALLOWED ={"session_id", "user_id", "event_type", "transaction_details", "request_id"}
+EVAL_ALLOWED = {"session_id", "user_id", "event_type", "transaction_details", "request_id", "allow_degraded"}
 TX_ALLOWED = {"amount", "currency", "beneficiary_account", "is_new_beneficiary"}
 
 
@@ -223,6 +223,8 @@ def validate_evaluate(p):
         _fail("invalid_request", f"event_type must be one of {list(config.EVENT_TYPES)}")
     if "request_id" in p:
         _need_id(p["request_id"], "request_id")
+    if "allow_degraded" in p and not isinstance(p["allow_degraded"], bool):
+        _fail("invalid_request", "allow_degraded must be true or false")
 
     tx = p.get("transaction_details")
     if p["event_type"] in config.SENSITIVE_EVENTS and tx is None:
@@ -241,4 +243,25 @@ def validate_evaluate(p):
                 _fail("invalid_request", "currency must be a 3-letter code")
         if "is_new_beneficiary" in tx and not isinstance(tx["is_new_beneficiary"], bool):
             _fail("invalid_request", "is_new_beneficiary must be true or false")
+    return p
+
+
+FEEDBACK_ALLOWED = {"session_id", "label", "source", "note"}
+FEEDBACK_LABELS = ("FRAUD", "GENUINE")
+
+
+def validate_feedback(p):
+    if not isinstance(p, dict):
+        _fail("invalid_request", "body must be a JSON object")
+    unknown = set(p) - FEEDBACK_ALLOWED
+    if unknown:
+        _fail("unknown_field", f"unknown fields: {sorted(unknown)}")
+    if "session_id" not in p or "label" not in p:
+        _fail("invalid_request", "session_id and label are required")
+    _need_id(p["session_id"], "session_id")
+    if p["label"] not in FEEDBACK_LABELS:
+        _fail("invalid_request", f"label must be one of {list(FEEDBACK_LABELS)}")
+    for name, limit in (("source", 64), ("note", 500)):
+        if name in p and (not isinstance(p[name], str) or len(p[name]) > limit):
+            _fail("invalid_request", f"{name} must be a string of at most {limit} characters")
     return p

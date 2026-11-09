@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time_ms INTEGER NOT NULL, actor TEXT NOT NULL,
     action TEXT NOT NULL, target TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, label TEXT NOT NULL,
+    decided_level TEXT, source TEXT, note TEXT, time_ms INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS feedback_session ON feedback(session_id);
 """
 
 
@@ -196,6 +200,39 @@ class BackOffice:
                        (entry["session_id"], entry["time_ms"], entry["time_ms"], "OPEN", None, entry["risk_level"],
                         entry["risk_score"], entry.get("user_id"), entry.get("device_guid"), json.dumps(entry)))
 
+    # feedback (bank-confirmed outcomes)
+    def apply_feedback(self, session_id, label, source, note, baselines):
+        rows = self.q("SELECT record FROM decisions WHERE session_id=? ORDER BY id DESC LIMIT 1", (session_id,))
+        if not rows:
+            raise ValidationFailure(404, "unknown_session", "FortGuard has no decision for this session")
+        record = json.loads(rows[0]["record"])
+        now = self.now_ms()
+        self.x("INSERT INTO feedback (session_id, label, decided_level, source, note, time_ms) VALUES (?,?,?,?,?,?)",
+               (session_id, label, record["risk_level"], source, note, now))
+        removed = baselines.forget(session_id) if label == "FRAUD" else 0
+        case = self.q("SELECT id, status FROM cases WHERE session_id=?", (session_id,))
+        case_id = case[0]["id"] if case else None
+        if label == "FRAUD":
+            if case_id is None:  # FortGuard allowed it: a missed fraud. Open a case so it is reviewed.
+                cur = self.x("INSERT INTO cases (session_id, created_ms, updated_ms, status, assignee, risk_level, risk_score, "
+                             "user_id, device_guid, decision) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                             (session_id, now, now, "CONFIRMED_FRAUD", None, record["risk_level"], record["risk_score"],
+                              record.get("user_id"), record.get("device_guid"), json.dumps(record)))
+                case_id = cur.lastrowid
+                self.audit(source or "bank-api", "case_update", f"case:{case_id}",
+                           {"before": {"status": None}, "after": {"status": "CONFIRMED_FRAUD"}, "via": "feedback"})
+            elif case[0]["status"] != "CONFIRMED_FRAUD":
+                self.x("UPDATE cases SET status='CONFIRMED_FRAUD', updated_ms=? WHERE id=?", (now, case_id))
+                self.audit(source or "bank-api", "case_update", f"case:{case_id}",
+                           {"before": {"status": case[0]["status"]}, "after": {"status": "CONFIRMED_FRAUD"}, "via": "feedback"})
+        elif case_id is not None and case[0]["status"] in ("OPEN", "INVESTIGATING"):
+            self.x("UPDATE cases SET status='FALSE_POSITIVE', updated_ms=? WHERE id=?", (now, case_id))
+            self.audit(source or "bank-api", "case_update", f"case:{case_id}",
+                       {"before": {"status": case[0]["status"]}, "after": {"status": "FALSE_POSITIVE"}, "via": "feedback"})
+        self.audit(source or "bank-api", "feedback", f"session:{session_id}", {"label": label, "decided": record["risk_level"]})
+        return {"session_id": session_id, "label": label, "decided_level": record["risk_level"],
+                "case_id": case_id, "baseline_sessions_removed": removed}
+
     # rules
     def load_rules(self):
         """Apply rule settings saved earlier, if any."""
@@ -285,6 +322,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
                        range((since // 3_600_000 + 1) * 3_600_000, bo.now_ms() + 1, 3_600_000)] if rows else [],
             "cases": {s: statuses[s] for s in CASE_STATUSES},
             "devices": {"total": len(registry.all()), "revoked": sum(1 for d in registry.all() if d.status != "ACTIVE")},
+            "feedback": feedback_summary(bo),
         })
 
     # cases
@@ -349,6 +387,9 @@ def register(app, *, bo, api_key, registry, dev_mode):
         sets = ", ".join(f"{k}=?" for k in changes)
         bo.x(f"UPDATE cases SET {sets}, updated_ms=? WHERE id=?", list(changes.values()) + [bo.now_ms(), case_id])
         bo.audit(user["username"], "case_update", f"case:{case_id}", {"before": before, "after": changes})
+        if changes.get("status") == "CONFIRMED_FRAUD":
+            from flask import current_app
+            current_app.fortguard_baselines.forget(row["session_id"])
         return jsonify(_case_row(get_case(case_id)))
 
     @app.post("/v1/bo/cases/<int:case_id>/notes")
@@ -529,6 +570,20 @@ def register_dev(app, *, bo, api_key, clock, dev_mode):
             results.append({"scenario": name, "risk_level": body.get("risk_level"), "risk_score": body.get("risk_score")})
         bo.audit(user["username"], "dev_simulate", "scenarios", {"count": len(results)})
         return jsonify({"results": results})
+
+
+def feedback_summary(bo):
+    """Outcomes the bank confirmed, against what FortGuard decided at the time."""
+    rows = bo.q("SELECT label, decided_level FROM feedback")
+    fraud = [r for r in rows if r["label"] == "FRAUD"]
+    genuine = [r for r in rows if r["label"] == "GENUINE"]
+    return {
+        "fraud_reported": len(fraud),
+        "fraud_caught": sum(1 for r in fraud if r["decided_level"] in ("STEP_UP", "BLOCK")),
+        "fraud_missed": sum(1 for r in fraud if r["decided_level"] == "ALLOW"),
+        "genuine_reported": len(genuine),
+        "genuine_challenged": sum(1 for r in genuine if r["decided_level"] in ("STEP_UP", "BLOCK")),
+    }
 
 
 def _limit(value, default):

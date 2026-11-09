@@ -46,6 +46,8 @@ WEIGHTS = {
     "REASON_NO_TELEMETRY": 200,
     # Attestation says the device passes basic checks only, not the stronger device or hardware tiers.
     "REASON_DEVICE_INTEGRITY_WEAK": 200,
+    # The session's behavior is far from this user's own baseline (only once the baseline is mature).
+    "REASON_BEHAVIORAL_ANOMALY_HIGH": 300,
 }
 
 # Rules that lift the score to at least the STEP_UP band, whatever else is true.
@@ -77,10 +79,20 @@ MAX_SENSOR_PER_BATCH = 5000
 MAX_EVENTS_PER_SESSION = 50_000
 MAX_IDEMPOTENCY_ENTRIES = 100_000
 
+# --- Behavioral baselines ----------------------------------------------------------------------
+BASELINE_MIN_SESSIONS = 10      # PRD: the biometric match cannot affect decisions before this
+BASELINE_WINDOW = 30            # most recent allowed sessions kept per user
+BASELINE_MIN_FEATURES = 3       # features needed to compute a match at all
+BASELINE_REL_SD_FLOOR = 0.10    # spread never treated as smaller than 10% of the mean
+BASELINE_ANOMALY_BELOW = 0.35   # match score that raises REASON_BEHAVIORAL_ANOMALY_HIGH
+
+# --- Degraded mode (PRD section 6 fail policy) ---------------------------------------------------
+DEGRADED_STEP_UP_AMOUNT = 100_000   # PKR; at or above this a degraded decision steps up
+
 # --- Device trust ----------------------------------------------------------------------------
 CHALLENGE_TTL_S = 300
 MAX_CHALLENGES = 100_000
 ALLOWED_APP_IDS = ("com.example.mobilebank",)  # replace with the pilot app's package and bundle IDs
 PLATFORMS = ("Android", "iOS", "Web")  # "Web" is the browser test client only
 
-MODEL_VERSION = "rules-0.2.0"
+MODEL_VERSION = "rules-0.3.0+baseline-1"

@@ -186,6 +186,11 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
   function pill(v, text) { return el("span", { class: "pill " + v, text: text || (STATUS_TEXT[v] || v.replace(/_/g, " ")) }); }
   function when(ms) { var d = new Date(ms); return d.toLocaleDateString() + " " + d.toLocaleTimeString(); }
   function money(a, c) { return a == null ? "–" : (c || "") + " " + Number(a).toLocaleString(); }
+  function baselineText(b) {
+    if (!b || b.status === "NONE") return "none yet";
+    if (b.status === "LEARNING") return "learning (" + b.sessions + " of " + b.required + " sessions)" + (b.match_score_preview != null ? ", preview match " + Math.round(b.match_score_preview * 100) + "% (not used yet)" : "");
+    return "match " + (b.match_score != null ? Math.round(b.match_score * 100) + "%" : "n/a") + " against " + b.sessions + " sessions" + (b.least_typical_features && b.least_typical_features.length ? "; least typical: " + b.least_typical_features.map(function (f) { return f.replace(/^ft_/, "").replace(/_/g, " "); }).join(", ") : "");
+  }
   function reasonText(code) { return (FGCore.REASONS[code] || code); }
   function short(s, n) { return s && s.length > n ? s.slice(0, n) + "…" : (s || "–"); }
   function say(t, err) { var m = $("msg"); m.textContent = t || ""; m.className = "msg" + (err ? " err" : ""); }
@@ -263,6 +268,13 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
       tile(o.cases.OPEN + o.cases.INVESTIGATING, "Cases to work"), tile(o.cases.CONFIRMED_FRAUD, "Confirmed fraud"),
       tile(o.devices.total, "Devices (" + o.devices.revoked + " revoked)")
     ]));
+    var fb = o.feedback;
+    if (fb && (fb.fraud_reported || fb.genuine_reported)) {
+      v.appendChild(el("div", { class: "tiles" }, [
+        tile(fb.fraud_reported, "Fraud reported by the bank"), tile(fb.fraud_caught, "…of which FortGuard flagged"),
+        tile(fb.fraud_missed, "…of which FortGuard missed"), tile(fb.genuine_challenged + " / " + fb.genuine_reported, "Genuine sessions challenged")
+      ]));
+    }
     var max = Math.max.apply(null, [1].concat(o.hourly.map(function (h) { return h.ALLOW + h.STEP_UP + h.BLOCK; })));
     var chart = el("div", { class: "chart", role: "img", "aria-label": "Decisions per hour, last 24 hours" },
       o.hourly.map(function (h) {
@@ -333,7 +345,8 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
      ["Device", (c.device_guid || "–") + (c.device ? " · " + c.device.platform + " · attestation " + c.device.integrity_level + " · " + c.device.status.toLowerCase() : "")],
      ["Amount", money(d.amount, d.currency)], ["Beneficiary", d.beneficiary_last4 ? "…" + d.beneficiary_last4 + (d.is_new_beneficiary ? " (new)" : "") : "–"],
      ["Bot probability", Math.round((td.bot_probability || 0) * 100) + "%"], ["Coercion probability", Math.round((td.coercion_scam_probability || 0) * 100) + "%"],
-     ["Remote tool", td.rat_detected ? "yes" : "no"], ["Signals used", d.signals_used], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
+     ["Remote tool", td.rat_detected ? "yes" : "no"], ["Behavior baseline", baselineText(d.baseline)],
+     ["Signals used", d.signals_used + (d.degraded ? " (degraded mode)" : "")], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
     var left = [card("Why FortGuard flagged it", why), card("Details", [facts])];

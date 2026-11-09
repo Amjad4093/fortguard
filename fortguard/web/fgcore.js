@@ -79,7 +79,10 @@
     REASON_NO_SENSOR_DATA: "Touches arrive but no motion-sensor data was sent.",
     REASON_NO_TELEMETRY: "No behavioral data was received for this session.",
     REASON_DEVICE_INTEGRITY_WEAK: "Attestation shows basic integrity only.",
-    RULE_FORCE_STEP_UP: "Raised to the step-up band by a hard rule."
+    RULE_FORCE_STEP_UP: "Raised to the step-up band by a hard rule.",
+    REASON_BEHAVIORAL_ANOMALY_HIGH: "Behavior is far from this customer's own usual pattern.",
+    REASON_DEGRADED_NO_TELEMETRY: "Degraded mode: no behavioral data, decided from the transaction alone.",
+    REASON_DEGRADED_SCORING_ERROR: "Degraded mode: scoring failed, decided from the transaction alone."
   };
   var ACTIONS = {
     PROCEED: "Let it through",

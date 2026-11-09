@@ -3,6 +3,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write   # to publish the simulator screenshot as a pre-release
+
 jobs:
   build:
     runs-on: macos-15
@@ -60,6 +63,16 @@ jobs:
         run: |
           grep -c "POST /v1/risk/evaluate" server.log
           grep "POST /v1/risk/evaluate" server.log | grep -q " 200 "
+
+      - name: Publish the screenshot as the "ios-test" pre-release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-test --yes --cleanup-tag || true
+          gh release create ios-test ios-simulator.png FortGuardDemo-simulator.zip --prerelease --target "$GITHUB_SHA" \
+            --title "FortGuard Demo iOS (simulator test build)" \
+            --notes "Simulator build from commit $GITHUB_SHA, with a screenshot of the app after it received a decision. Runs on the iOS Simulator only; a real iPhone needs Apple Developer signing."
 
       - uses: actions/upload-artifact@v4
         if: always()
