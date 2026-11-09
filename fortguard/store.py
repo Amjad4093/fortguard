@@ -50,6 +50,10 @@ class SessionStore:
         self.lock = threading.RLock()
         self._lock = self.lock
 
+    def count(self):
+        with self._lock:
+            return len(self._sessions)
+
     def get(self, session_id):
         now = self.clock()
         with self._lock:

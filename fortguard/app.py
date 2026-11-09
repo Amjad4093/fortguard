@@ -23,7 +23,7 @@ from . import config
 from .attestation import (
     DEV_AUTHORITY, AttestationError, AttestationNotConfigured, SimulatedVerifier,
 )
-from . import admin, backoffice
+from . import admin, backoffice, hardening
 from .baseline import Baselines
 from .devices import ACTIVE, DeviceRegistry
 from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_feedback, validate_telemetry
@@ -49,8 +49,26 @@ class _NoSession:
         self.user_id = user_id
 
 
+def _start_purge_job(bo, baselines):
+    """Hourly retention purge in a background thread (one server process)."""
+    import logging
+    import threading
+
+    def loop():
+        while True:
+            time.sleep(config.PURGE_EVERY_S)
+            try:
+                out = bo.purge(baselines)
+                bo.audit("system", "purge", "retention", out)
+            except Exception:  # keep the job alive whatever happens
+                logging.getLogger("fortguard").exception("retention purge failed")
+
+    threading.Thread(target=loop, name="fortguard-purge", daemon=True).start()
+
+
 def create_app(api_key=None, clock=time.time, store=None, registry=None, verifier=None,
-               allowed_app_ids=None, dev_mode=None, db_path=None, admin_password=None):
+               allowed_app_ids=None, dev_mode=None, db_path=None, admin_password=None,
+               start_jobs=False):
     """Build the app.
 
     The API key comes from the argument, then FORTGUARD_API_KEY, then a development value.
@@ -89,6 +107,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
     app.fortguard_backoffice = bo
     baselines = Baselines(bo)
     app.fortguard_baselines = baselines
+    if start_jobs:
+        _start_purge_job(bo, baselines)
     idempotent = OrderedDict()
 
     def read_json():
@@ -97,6 +117,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
             return json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             raise ValidationFailure(400, "invalid_json", "body is not valid JSON")
+
+    hardening.register(app, api_key=api_key, store=store, registry=registry, clock=clock, error=_error)
 
     @app.errorhandler(ValidationFailure)
     def _validation(exc):
@@ -228,6 +250,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
         bo.record_decision(decisions.record(body, session, result, clock()))
+        app.fortguard_metrics.decision(result["risk_level"], result.get("degraded"))
         if feats is not None and result["risk_level"] == "ALLOW":
             baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))
 
@@ -264,7 +287,7 @@ def main():  # pragma: no cover - manual run
     parser.add_argument("--data", default=os.environ.get("FORTGUARD_DATA_DIR", "data"),
                         help="folder for the back-office database (default: ./data)")
     args = parser.parse_args()
-    app = create_app(dev_mode=True if args.dev else None, db_path=os.path.join(args.data, "fortguard.db"))
+    app = create_app(dev_mode=True if args.dev else None, db_path=os.path.join(args.data, "fortguard.db"), start_jobs=True)
     dev = args.dev or os.environ.get("FORTGUARD_DEV_MODE") == "1"
     scheme = "https" if args.https else "http"
     shown = "<this computer's LAN address>" if args.host == "0.0.0.0" else args.host
@@ -280,3 +303,8 @@ def main():  # pragma: no cover - manual run
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+def production_app():
+    """Entry point for gunicorn: python -m gunicorn 'fortguard.app:production_app()'."""
+    return create_app(start_jobs=True)

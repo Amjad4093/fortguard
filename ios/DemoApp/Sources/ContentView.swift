@@ -29,6 +29,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
+            ScrollViewReader { proxy in
             Form {
                 Section(footer: Text("Test app for the FortGuard SDK. Attestation is simulated by a server running with --dev. Typed text never leaves the phone: only edit timing and the field name.")) {
                     TextField("Server address", text: $server)
@@ -99,7 +100,13 @@ struct ContentView: View {
                         Text(result).foregroundColor(resultColor).textSelection(.enabled)
                             .accessibilityIdentifier("decision")
                     }
+                    .id("decision")
                 }
+            }
+            .onChange(of: result) { _ in
+                // bring the decision into view when it arrives
+                DispatchQueue.main.async { withAnimation { proxy.scrollTo("decision", anchor: .top) } }
+            }
             }
             .navigationTitle("FortGuard Demo")
         }

@@ -277,3 +277,92 @@ def test_dev_simulate_needs_dev_mode_and_analyst(clock, bo_app, admin):
     prod = create_app(clock=clock, admin_password=ADMIN_PW, dev_mode=False)
     p = Portal(prod); p.login("admin", ADMIN_PW)
     assert p.call("post", "/v1/bo/dev/simulate")[0] == 404
+
+
+# --- Rule preview and replay ---------------------------------------------------------------------------------
+
+def fill(api, make_session):
+    for i, scenario in enumerate(("genuine", "genuine_new_payee", "coached_scam", "bot_scripted", "remote_control",
+                                  "rooted_device", "emulator_bot", "no_consent")):
+        run_session(api, make_session(scenario, i))
+
+
+def test_replay_with_unchanged_rules_reproduces_every_decision(api, admin, make_session):
+    fill(api, make_session)
+    status, out = admin.call("post", "/v1/bo/rules/preview", {})
+    assert status == 200 and out["replayed"] == 8
+    assert out["changed_total"] == 0 and out["before"] == out["after"]
+
+
+def test_preview_shows_impact_without_changing_anything(api, admin, make_session):
+    fill(api, make_session)
+    before_weights = dict(config.WEIGHTS)
+    status, out = admin.call("post", "/v1/bo/rules/preview", {"weights": {"REASON_NEW_BENEFICIARY": 650}})
+    assert status == 200
+    assert out["moves"].get("ALLOW->STEP_UP", 0) >= 1
+    assert any(c["after"]["level"] == "STEP_UP" and "REASON_NEW_BENEFICIARY" in c["reasons"] for c in out["changed"])
+    assert dict(config.WEIGHTS) == before_weights  # nothing saved
+    assert not any(a["action"] == "rules_update" for a in admin.call("get", "/v1/bo/audit")[1]["audit"])
+
+
+def test_preview_counts_labeled_outcomes(api, admin, make_session):
+    missed = make_session("genuine_new_payee", 1)
+    run_session(api, missed)
+    api.post("/v1/feedback", {"session_id": missed["session_id"], "label": "FRAUD"}, auth=True)
+    out = admin.call("post", "/v1/bo/rules/preview", {"weights": {"REASON_NEW_BENEFICIARY": 650}})[1]
+    assert out["labeled_outcomes"]["fraud"] == {"flagged_before": 0, "flagged_after": 1, "total": 1}
+
+
+def test_preview_band_change_and_validation(api, admin, make_session):
+    fill(api, make_session)
+    out = admin.call("post", "/v1/bo/rules/preview", {"bands": {"block_from": 601}})[1]
+    assert out["moves"].get("STEP_UP->BLOCK", 0) >= 1
+    assert admin.call("post", "/v1/bo/rules/preview", {"bands": {"step_up_from": 950}})[0] == 400
+
+
+def test_viewer_can_preview_but_not_save(api, admin, bo_app, make_session):
+    viewer = make_user(admin, bo_app, "omar", "viewer")
+    assert viewer.call("post", "/v1/bo/rules/preview", {"weights": {"REASON_VPN_OR_PROXY": 0}})[0] == 200
+    assert viewer.call("put", "/v1/bo/rules", {"weights": {"REASON_VPN_OR_PROXY": 0}})[0] == 403
+
+
+# --- Retention and erasure -------------------------------------------------------------------------------------
+
+def test_purge_deletes_old_records_but_keeps_confirmed_fraud(api, admin, bo_app, make_session, clock):
+    fraud, other = make_session("coached_scam", 1), make_session("bot_scripted", 2)
+    run_session(api, fraud); run_session(api, other); run_session(api, make_session("genuine", 3))
+    api.post("/v1/feedback", {"session_id": fraud["session_id"], "label": "FRAUD"}, auth=True)
+    clock.now += 800 * 86400
+    admin.login("admin", ADMIN_PW)  # the old sign-in expired long ago
+    status, out = admin.call("post", "/v1/bo/maintenance/purge")
+    assert status == 200 and out["deleted"]["decisions"] == 3 and out["deleted"]["cases"] == 1
+    remaining = bo_app.fortguard_backoffice.q("SELECT status FROM cases")
+    assert [r["status"] for r in remaining] == ["CONFIRMED_FRAUD"]
+    assert bo_app.fortguard_baselines.profile(make_session("genuine", 3)["evaluate"]["user_id"])["sessions"] == 0
+
+
+def test_purge_keeps_recent_records(api, admin, make_session):
+    run_session(api, make_session("coached_scam", 1))
+    assert admin.call("post", "/v1/bo/maintenance/purge")[1]["deleted"]["decisions"] == 0
+
+
+def test_customer_erasure(api, admin, bo_app, make_session):
+    sessions = [make_session(s, i) for i, s in enumerate(("genuine", "coached_scam", "bot_scripted"))]
+    for s in sessions:
+        s["evaluate"]["user_id"] = "usr_erase_me"
+        run_session(api, s)
+    api.post("/v1/feedback", {"session_id": sessions[2]["session_id"], "label": "FRAUD"}, auth=True)
+    run_session(api, make_session("genuine", 9))  # someone else
+    status, out = admin.call("post", "/v1/bo/customers/usr_erase_me/erase")
+    assert status == 200
+    d = out["deleted"]
+    assert d["decisions"] == 3 and d["baseline_sessions"] == 1 and d["cases"] == 1 and d["kept_fraud_cases"] == 1
+    bo = bo_app.fortguard_backoffice
+    assert bo.q("SELECT COUNT(*) AS n FROM decisions")[0]["n"] == 1  # the other customer is untouched
+    assert admin.call("get", "/v1/bo/audit")[1]["audit"][0]["action"] == "customer_erase"
+
+
+def test_purge_and_erase_need_admin(api, admin, bo_app, make_session):
+    analyst = make_user(admin, bo_app, "sara", "analyst")
+    assert analyst.call("post", "/v1/bo/maintenance/purge")[0] == 403
+    assert analyst.call("post", "/v1/bo/customers/usr_x/erase")[0] == 403

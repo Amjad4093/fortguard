@@ -7,4 +7,4 @@ COPY requirements.txt requirements-prod.txt ./
 RUN pip install --no-cache-dir -r requirements-prod.txt
 COPY fortguard ./fortguard
 EXPOSE 8080
-CMD ["sh", "-c", "gunicorn 'fortguard.app:create_app()' --workers 1 --threads 16 --bind 0.0.0.0:${PORT:-8080} --access-logfile -"]
+CMD ["sh", "-c", "gunicorn 'fortguard.app:production_app()' --workers 1 --threads 16 --bind 0.0.0.0:${PORT:-8080} --access-logfile -"]

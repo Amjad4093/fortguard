@@ -233,6 +233,39 @@ class BackOffice:
         return {"session_id": session_id, "label": label, "decided_level": record["risk_level"],
                 "case_id": case_id, "baseline_sessions_removed": removed}
 
+    # retention and erasure
+    def purge(self, baselines=None):
+        """Delete records older than config.RETENTION_DAYS. Confirmed-fraud cases are kept as evidence."""
+        now = self.now_ms()
+        day = 86_400_000
+        r = config.RETENTION_DAYS
+        out = {
+            "decisions": self.x("DELETE FROM decisions WHERE time_ms < ?", (now - r["decisions"] * day,)).rowcount,
+            "cases": self.x("DELETE FROM cases WHERE status <> 'CONFIRMED_FRAUD' AND updated_ms < ?", (now - r["closed_cases"] * day,)).rowcount,
+            "feedback": self.x("DELETE FROM feedback WHERE time_ms < ?", (now - r["feedback"] * day,)).rowcount,
+            "audit": self.x("DELETE FROM audit WHERE time_ms < ?", (now - r["audit"] * day,)).rowcount,
+            "tokens": self.x("DELETE FROM tokens WHERE expires_ms < ?", (now,)).rowcount,
+        }
+        if baselines is not None:
+            out["baseline_sessions"] = self.x("DELETE FROM baseline_sessions WHERE time_ms < ?", (now - r["decisions"] * day,)).rowcount
+        self.x("DELETE FROM notes WHERE case_id NOT IN (SELECT id FROM cases)")
+        return out
+
+    def erase_customer(self, user_id, baselines):
+        """Right to erasure: remove a customer's behavioral data and decision history.
+
+        Confirmed-fraud cases are kept (evidence, legal obligations); everything else about the
+        customer is deleted. The erasure itself is audited without storing anything about the data.
+        """
+        out = {
+            "baseline_sessions": baselines.forget_user(user_id),
+            "decisions": self.x("DELETE FROM decisions WHERE json_extract(record, '$.user_id') = ?", (user_id,)).rowcount,
+            "cases": self.x("DELETE FROM cases WHERE user_id = ? AND status <> 'CONFIRMED_FRAUD'", (user_id,)).rowcount,
+            "kept_fraud_cases": self.q("SELECT COUNT(*) AS n FROM cases WHERE user_id = ?", (user_id,))[0]["n"],
+        }
+        self.x("DELETE FROM notes WHERE case_id NOT IN (SELECT id FROM cases)")
+        return out
+
     # rules
     def load_rules(self):
         """Apply rule settings saved earlier, if any."""
@@ -449,31 +482,40 @@ def register(app, *, bo, api_key, registry, dev_mode):
     @app.put("/v1/bo/rules")
     def bo_rules_update():
         user = need("admin")
-        data = body()
-        weights = data.get("weights", {})
-        bands = data.get("bands", {})
-        if not isinstance(weights, dict) or not isinstance(bands, dict):
-            raise ValidationFailure(400, "invalid_request", "weights and bands must be objects")
-        for code, value in weights.items():
-            if code not in config.WEIGHTS:
-                raise ValidationFailure(400, "invalid_request", f"unknown rule {code}")
-            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= config.SCORE_MAX:
-                raise ValidationFailure(400, "invalid_request", f"{code} must be a whole number from 0 to {config.SCORE_MAX}")
-        new_bands = dict(config.BANDS["default"])
-        for name in bands:
-            if name not in new_bands:
-                raise ValidationFailure(400, "invalid_request", f"unknown band {name}")
-            if not isinstance(bands[name], int) or isinstance(bands[name], bool):
-                raise ValidationFailure(400, "invalid_request", f"{name} must be a whole number")
-        new_bands.update(bands)
-        if not 1 <= new_bands["step_up_from"] < new_bands["block_from"] <= config.SCORE_MAX:
-            raise ValidationFailure(400, "invalid_request", "bands must satisfy 1 <= step_up_from < block_from <= 1000")
+        weights, new_bands = validate_rules(body())
         before = {"weights": {k: config.WEIGHTS[k] for k in weights}, "bands": dict(config.BANDS["default"])}
         config.WEIGHTS.update(weights)
         config.BANDS["default"].update(new_bands)
         bo.save_rules()
         bo.audit(user["username"], "rules_update", "rules", {"before": before, "after": {"weights": weights, "bands": new_bands}})
         return jsonify(rules_view())
+
+    @app.post("/v1/bo/rules/preview")
+    def bo_rules_preview():
+        """Replay recent decisions under draft rules, without changing anything."""
+        need("viewer")
+        weights, new_bands = validate_rules(body())
+        limit = _limit(request.args.get("limit"), 2000)
+        return jsonify(replay(bo, weights, new_bands, limit))
+
+    # retention and erasure
+    @app.post("/v1/bo/maintenance/purge")
+    def bo_purge():
+        user = need("admin")
+        from flask import current_app
+        out = bo.purge(current_app.fortguard_baselines)
+        bo.audit(user["username"], "purge", "retention", out)
+        return jsonify({"deleted": out, "retention_days": config.RETENTION_DAYS})
+
+    @app.post("/v1/bo/customers/<user_id>/erase")
+    def bo_erase(user_id):
+        user = need("admin")
+        if not 1 <= len(user_id) <= 64:
+            raise ValidationFailure(400, "invalid_request", "bad customer id")
+        from flask import current_app
+        out = bo.erase_customer(user_id, current_app.fortguard_baselines)
+        bo.audit(user["username"], "customer_erase", f"customer:{user_id}", out)
+        return jsonify({"user_id": user_id, "deleted": out})
 
     # users
     @app.get("/v1/bo/users")
@@ -570,6 +612,84 @@ def register_dev(app, *, bo, api_key, clock, dev_mode):
             results.append({"scenario": name, "risk_level": body.get("risk_level"), "risk_score": body.get("risk_score")})
         bo.audit(user["username"], "dev_simulate", "scenarios", {"count": len(results)})
         return jsonify({"results": results})
+
+
+def validate_rules(data):
+    """Check a rules change; returns (weights to change, the complete new default bands)."""
+    weights = data.get("weights", {})
+    bands = data.get("bands", {})
+    if not isinstance(weights, dict) or not isinstance(bands, dict):
+        raise ValidationFailure(400, "invalid_request", "weights and bands must be objects")
+    for code, value in weights.items():
+        if code not in config.WEIGHTS:
+            raise ValidationFailure(400, "invalid_request", f"unknown rule {code}")
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= config.SCORE_MAX:
+            raise ValidationFailure(400, "invalid_request", f"{code} must be a whole number from 0 to {config.SCORE_MAX}")
+    new_bands = dict(config.BANDS["default"])
+    for name in bands:
+        if name not in new_bands:
+            raise ValidationFailure(400, "invalid_request", f"unknown band {name}")
+        if not isinstance(bands[name], int) or isinstance(bands[name], bool):
+            raise ValidationFailure(400, "invalid_request", f"{name} must be a whole number")
+    new_bands.update(bands)
+    if not 1 <= new_bands["step_up_from"] < new_bands["block_from"] <= config.SCORE_MAX:
+        raise ValidationFailure(400, "invalid_request", "bands must satisfy 1 <= step_up_from < block_from <= 1000")
+    return weights, new_bands
+
+
+def rescore(record, weights, bands):
+    """Score one stored decision again from its reason codes under draft weights and bands.
+
+    Uses the reasons that fired at the time; it does not recompute behavior. Degraded decisions
+    are returned unchanged because their score does not come from rule weights.
+    """
+    from .scoring import FORCE_STEP_UP_REASONS
+
+    if record.get("degraded") or str(record.get("signals_used")) == "TRANSACTION_ONLY":
+        return record["risk_score"], record["risk_level"]
+    reasons = [item["reason"] for item in record.get("score_breakdown", []) if item["reason"] in config.WEIGHTS]
+    w = dict(config.WEIGHTS); w.update(weights)
+    score = min(config.SCORE_MAX, sum(w[r] for r in reasons))
+    if score < config.FORCE_STEP_UP_MIN_SCORE and any(r in reasons for r in FORCE_STEP_UP_REASONS):
+        score = config.FORCE_STEP_UP_MIN_SCORE
+    level = "BLOCK" if score >= bands["block_from"] else ("STEP_UP" if score >= bands["step_up_from"] else "ALLOW")
+    return score, level
+
+
+def replay(bo, weights, bands, limit=2000):
+    rows = bo.q("SELECT record FROM decisions ORDER BY id DESC LIMIT ?", (limit,))
+    labels = {r["session_id"]: r["label"] for r in bo.q("SELECT session_id, label FROM feedback ORDER BY id")}
+    levels = ("ALLOW", "STEP_UP", "BLOCK")
+    before = {lv: 0 for lv in levels}
+    after = {lv: 0 for lv in levels}
+    moves = {}
+    changed = []
+    outcome = {"fraud": {"flagged_before": 0, "flagged_after": 0, "total": 0},
+               "genuine": {"challenged_before": 0, "challenged_after": 0, "total": 0}}
+    for row in rows:
+        rec = json.loads(row["record"])
+        old_level = rec["risk_level"]
+        new_score, new_level = rescore(rec, weights, bands)
+        before[old_level] += 1
+        after[new_level] += 1
+        if new_level != old_level:
+            key = f"{old_level}->{new_level}"
+            moves[key] = moves.get(key, 0) + 1
+            if len(changed) < 25:
+                changed.append({"session_id": rec["session_id"], "user_id": rec.get("user_id"),
+                                "before": {"score": rec["risk_score"], "level": old_level},
+                                "after": {"score": new_score, "level": new_level},
+                                "reasons": [i["reason"] for i in rec.get("score_breakdown", [])]})
+        label = labels.get(rec["session_id"])
+        if label == "FRAUD":
+            o = outcome["fraud"]; o["total"] += 1
+            o["flagged_before"] += old_level != "ALLOW"; o["flagged_after"] += new_level != "ALLOW"
+        elif label == "GENUINE":
+            o = outcome["genuine"]; o["total"] += 1
+            o["challenged_before"] += old_level != "ALLOW"; o["challenged_after"] += new_level != "ALLOW"
+    return {"replayed": len(rows), "before": before, "after": after, "moves": moves,
+            "changed": changed, "changed_total": sum(moves.values()), "labeled_outcomes": outcome,
+            "note": "Replays the reasons recorded at decision time under the draft rules; behavior is not recomputed."}
 
 
 def feedback_summary(bo):

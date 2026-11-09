@@ -89,6 +89,23 @@ BASELINE_ANOMALY_BELOW = 0.35   # match score that raises REASON_BEHAVIORAL_ANOM
 # --- Degraded mode (PRD section 6 fail policy) ---------------------------------------------------
 DEGRADED_STEP_UP_AMOUNT = 100_000   # PKR; at or above this a degraded decision steps up
 
+# --- Retention (days; see BackOffice.purge) --------------------------------------------------------
+RETENTION_DAYS = {
+    "decisions": 180,        # decision records (scores, reasons, masked transaction)
+    "closed_cases": 365,     # cases closed, false positive or still open; confirmed fraud is kept
+    "feedback": 730,
+    "audit": 730,
+}
+PURGE_EVERY_S = 3600
+
+# --- Rate limits (requests per minute; see hardening.py) -----------------------------------------
+RATE_LIMITS = {
+    "login": 20,         # per client IP
+    "challenge": 30,     # per client IP
+    "telemetry": 240,    # per device: a batch every 5 s is 12 per minute
+    "evaluate": 6000,    # per API key
+}
+
 # --- Device trust ----------------------------------------------------------------------------
 CHALLENGE_TTL_S = 300
 MAX_CHALLENGES = 100_000

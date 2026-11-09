@@ -1,8 +1,16 @@
 {
   "action_recommended": "CHALLENGE_FIDO2_OR_OTP",
+  "baseline": {
+    "least_typical_features": [],
+    "match_score": null,
+    "match_score_preview": null,
+    "required": 10,
+    "sessions": 0,
+    "status": "NONE"
+  },
   "degraded": false,
   "latency_ms": 0.0,
-  "model_version": "rules-0.2.0",
+  "model_version": "rules-0.3.0+baseline-1",
   "reason_codes": [
     "REASON_ACTIVE_CALL_DURING_PAYMENT",
     "REASON_COGNITIVE_HESITATION_DETECTED",

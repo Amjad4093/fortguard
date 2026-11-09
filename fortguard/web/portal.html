@@ -167,7 +167,8 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
   var STATUSES = ["OPEN", "INVESTIGATING", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
   var STATUS_TEXT = { OPEN: "Open", INVESTIGATING: "Investigating", CONFIRMED_FRAUD: "Confirmed fraud", FALSE_POSITIVE: "False positive", CLOSED: "Closed" };
   var ACTION_TEXT = { login: "signed in", login_failed: "failed sign-in", logout: "signed out", case_update: "updated case", note_add: "added a note",
-    device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios" };
+    device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios",
+    feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data" };
 
   try { S.token = sessionStorage.getItem("fg_token"); } catch (e) { /* ignore */ }
 
@@ -377,6 +378,14 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
           try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(c.device_guid) + "/revoke"); say("Device revoked."); route(); } catch (e) { say(e.message, true); }
         } })]));
     }
+    if (can("admin") && c.user_id) work.push(card("Customer data", [
+      el("p", { text: "For an erasure request: deletes this customer's behavior baseline, decision history and non-fraud cases. Confirmed-fraud cases are kept as evidence." }),
+      el("button", { class: "danger", type: "button", text: "Forget this customer", onclick: async function () {
+        if (!confirm("Erase FortGuard data for customer " + c.user_id + "? This cannot be undone.")) return;
+        try { var out = await call("POST", "/v1/bo/customers/" + encodeURIComponent(c.user_id) + "/erase");
+          say("Erased: " + out.deleted.decisions + " decisions, " + out.deleted.baseline_sessions + " baseline sessions, " + out.deleted.cases + " cases. Kept " + out.deleted.kept_fraud_cases + " confirmed-fraud case(s).");
+          location.hash = "#/cases"; } catch (e) { say(e.message, true); }
+      } })]));
     var notes = c.notes.map(function (n) { return el("div", { class: "note" }, [el("small", { text: n.author + " · " + when(n.created_ms) }), el("div", { text: n.text })]); });
     if (!notes.length) notes.push(el("div", { class: "empty", text: "No notes yet." }));
     if (can("analyst")) {
@@ -443,17 +452,26 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
       inp.addEventListener("input", function () { wrap.classList.toggle("changed", Number(inp.value) !== def); });
       inputs[key] = inp; return wrap;
     }
-    var save = admin ? el("button", { class: "primary", type: "button", text: "Save changes", onclick: async function () {
+    function draft() {
       var weights = {}, bands = {};
       Object.keys(r.weights).forEach(function (k) { weights[k] = parseInt(inputs[k].value, 10); });
       bands.step_up_from = parseInt(inputs.step_up_from.value, 10); bands.block_from = parseInt(inputs.block_from.value, 10);
-      try { await call("PUT", "/v1/bo/rules", { weights: weights, bands: bands }); say("Rules saved. They apply to the next decision."); route(); } catch (e) { say(e.message, true); }
+      return { weights: weights, bands: bands };
+    }
+    var save = admin ? el("button", { class: "primary", type: "button", text: "Save changes", onclick: async function () {
+      try { await call("PUT", "/v1/bo/rules", draft()); say("Rules saved. They apply to the next decision."); route(); } catch (e) { say(e.message, true); }
     } }) : null;
+    var impact = el("div");
+    var preview = el("button", { type: "button", text: "Preview impact", onclick: async function () {
+      impact.innerHTML = ""; say("Replaying recent decisions under the draft rules…");
+      try { showImpact(impact, await call("POST", "/v1/bo/rules/preview", draft())); say(""); } catch (e) { say(e.message, true); }
+    } });
     var reset = admin ? el("button", { type: "button", text: "Reset to defaults", onclick: async function () {
       if (!confirm("Put every rule and band back to its default?")) return;
       try { await call("PUT", "/v1/bo/rules", { weights: r.defaults.weights, bands: r.defaults.bands["default"] }); say("Defaults restored."); route(); } catch (e) { say(e.message, true); }
     } }) : null;
-    head(v, "Rules", [reset, save]);
+    head(v, "Rules", [reset, preview, save]);
+    v.appendChild(impact);
     if (!admin) say("Only admins can change rules.");
     var bandDef = r.defaults.bands["default"];
     v.appendChild(el("div", { class: "two" }, [
@@ -462,6 +480,29 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
         row("step_up_from", "Step-up from", r.bands.step_up_from, bandDef.step_up_from, 1, r.score_max), row("block_from", "Block from", r.bands.block_from, bandDef.block_from, 1, r.score_max),
         el("p", { class: "msg", text: "Every change is recorded in the audit log with the old and new values." })])
     ]));
+  }
+
+  function showImpact(box, p) {
+    var levels = ["ALLOW", "STEP_UP", "BLOCK"];
+    var rows = levels.map(function (lv) {
+      var diff = p.after[lv] - p.before[lv];
+      return el("tr", {}, [el("td", {}, [pill(lv)]), el("td", { text: String(p.before[lv]) }), el("td", { text: String(p.after[lv]) }),
+        el("td", { text: diff === 0 ? "–" : (diff > 0 ? "+" : "") + diff })]);
+    });
+    var f = p.labeled_outcomes.fraud, gn = p.labeled_outcomes.genuine;
+    var outcomes = el("p", { class: "msg", text: (f.total ? "Confirmed fraud flagged: " + f.flagged_before + " → " + f.flagged_after + " of " + f.total + ". " : "No confirmed fraud labels yet. ") +
+      (gn.total ? "Genuine customers challenged: " + gn.challenged_before + " → " + gn.challenged_after + " of " + gn.total + "." : "No genuine labels yet.") });
+    var changed = p.changed.map(function (c) {
+      return el("tr", {}, [el("td", { text: short(c.session_id, 16) }), el("td", { text: c.user_id || "–" }),
+        el("td", {}, [pill(c.before.level, c.before.level.replace("_", " ") + " " + c.before.score)]), el("td", {}, [pill(c.after.level, c.after.level.replace("_", " ") + " " + c.after.score)])]);
+    });
+    box.appendChild(card("Impact on the last " + p.replayed + " decisions (" + p.changed_total + " would change)", [
+      el("div", { class: "scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Decision", "Now", "With draft", "Change"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)])]),
+      outcomes,
+      changed.length ? el("div", { class: "scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Session", "User", "Was", "Would be"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, changed)])]) : null,
+      el("p", { class: "msg", text: p.note + " Nothing is saved until you press Save changes." })
+    ]));
+    box.appendChild(el("div", { style: "height:14px" }));
   }
 
   // --- users ---------------------------------------------------------------------------------------------------

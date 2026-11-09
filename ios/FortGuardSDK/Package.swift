@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "FortGuardSDK", targets: ["FortGuardSDK"]),
     ],
     targets: [
-        .target(name: "FortGuardSDK", path: "Sources/FortGuardSDK"),
+        .target(name: "FortGuardSDK", path: "Sources/FortGuardSDK", resources: [.copy("PrivacyInfo.xcprivacy")]),
         .testTarget(name: "FortGuardSDKTests", dependencies: ["FortGuardSDK"], path: "Tests/FortGuardSDKTests"),
     ]
 )

@@ -15,5 +15,7 @@ services:
         generateValue: true
       - key: FORTGUARD_ADMIN_PASSWORD  # first portal login: user "admin"
         generateValue: true
+      - key: FORTGUARD_TRUST_PROXY       # Render's proxy sets X-Forwarded-For
+        value: "1"
       - key: FORTGUARD_DATA_DIR
         value: /tmp/fortguard
