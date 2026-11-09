@@ -27,7 +27,8 @@ PORT = 8793
 def start_server():
     code = ("import uvicorn; from uvicorn.middleware.wsgi import WSGIMiddleware; from fortguard.app import create_app; "
             f"uvicorn.run(WSGIMiddleware(create_app(), workers=16), host='127.0.0.1', port={PORT}, log_level='warning')")
-    proc = subprocess.Popen([sys.executable, "-c", code], cwd=os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, FORTGUARD_RATE_LIMITS_OFF="1")  # one machine enrolls hundreds of devices
+    proc = subprocess.Popen([sys.executable, "-c", code], cwd=os.path.dirname(os.path.abspath(__file__)), env=env)
     for _ in range(100):
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{PORT}/healthz", timeout=1)

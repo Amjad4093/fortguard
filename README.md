@@ -9,7 +9,7 @@ contract can be argued about with something running.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                 # 214 tests
+python -m pytest -q                 # 322 tests
 python demo.py                      # every synthetic scenario through the full flow, as a table
 python -m fortguard.app --dev       # serve on 127.0.0.1:8080 with the portal and phone test page
 python demo.py --url http://127.0.0.1:8080
@@ -77,22 +77,22 @@ sensors, attestation or key store. The first real Android and iOS builds need th
 
 ## Load test (one instance, measured)
 
-`python loadtest.py` on a 2-core cloud container, one uvicorn process, 8 concurrent clients, the client on the
-same machine, 200 sessions (enroll, two signed batches of about 1,600 sensor samples each, evaluate):
+`python loadtest.py`: one uvicorn process, 8 concurrent clients on the same 2-core machine, 200 sessions
+(enroll, two signed batches of about 1,600 sensor samples each, evaluate). Both versions measured on the
+same machine at the same moment:
 
-| | |
-|---|---|
-| Throughput | about 139 requests per second, 46 full sessions per second, 0 errors |
-| Evaluate, end to end | p50 52 ms, p95 79 ms, p99 95 ms |
-| Telemetry, end to end | p50 60 ms, p95 92 ms, p99 104 ms |
-| Scoring inside the server | p50 7 ms, p95 30 ms, p99 40 ms |
+| | Before the incremental engine | With it |
+|---|---|---|
+| Scoring inside the server, p50 / p99 | 14.2 ms / 68.6 ms | **0.8 ms** / 59.9 ms |
+| Evaluate end to end, p50 / p99 | 82 ms / 186 ms | **47 ms** / 153 ms |
+| Telemetry end to end, p50 | 85 ms | 99 ms (now does the feature work) |
+| Throughput | 93 requests/s | 96 requests/s, while also writing cases, baselines and audit records |
 
-How to read this: the client shared the two cores with the server, so these are rough figures for one small
-instance, not capacity. They do show two things. The PRD's 50 ms P99 end to end is **not** met here, and the
-20 ms scoring budget is only met at the median. The cause is that scoring recomputes every feature from the
-whole stored event history on each evaluate, and in Python that slows sharply under concurrency. The fix is
-the hot-path design already in the PRD: compute features incrementally as telemetry arrives, so evaluate only
-reads a few precomputed numbers. A shared store and several instances are **not** tested.
+Features are now updated as telemetry arrives (`fortguard/incremental.py`), so scoring no longer re-reads
+the whole session. The remaining tail is CPU contention: one Python process, with the load generator
+sharing the same two cores. The PRD's 50 ms p99 is **not** demonstrated here; that needs the production
+shape (several processes and instances behind a shared session store) and a load test from separate
+machines. Treat these as relative numbers, not capacity.
 
 ## Endpoints
 

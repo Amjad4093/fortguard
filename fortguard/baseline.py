@@ -18,6 +18,7 @@ and a benchmark for the learned model (backlog E3-03) once real, consented pilot
 import json
 import math
 import statistics
+import threading
 
 from . import config
 
@@ -54,6 +55,8 @@ def _vector(feats):
 class Baselines:
     def __init__(self, bo):
         self.bo = bo
+        self._cache = {}          # user_id -> profile; invalidated on every change for that user
+        self._cache_lock = threading.Lock()
         with bo.lock:
             bo.db.executescript(SCHEMA)
             bo.db.commit()
@@ -64,6 +67,25 @@ class Baselines:
             (user_id, config.BASELINE_WINDOW))
 
     def profile(self, user_id):
+        with self._cache_lock:
+            cached = self._cache.get(user_id)
+        if cached is not None:
+            return cached
+        prof = self._profile(user_id)
+        with self._cache_lock:
+            if len(self._cache) > 100_000:
+                self._cache.clear()
+            self._cache[user_id] = prof
+        return prof
+
+    def _invalidate(self, user_id=None):
+        with self._cache_lock:
+            if user_id is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(user_id, None)
+
+    def _profile(self, user_id):
         rows = [json.loads(r["features"]) for r in self._rows(user_id)]
         stats = {}
         for name in PROFILE_FEATURES:
@@ -106,11 +128,16 @@ class Baselines:
             "DELETE FROM baseline_sessions WHERE user_id=? AND session_id NOT IN "
             "(SELECT session_id FROM baseline_sessions WHERE user_id=? ORDER BY time_ms DESC LIMIT ?)",
             (user_id, user_id, config.BASELINE_WINDOW))
+        self._invalidate(user_id)
         return True
 
     def forget(self, session_id):
         """Remove a session from every baseline, for example after it is reported as fraud."""
-        return self.bo.x("DELETE FROM baseline_sessions WHERE session_id=?", (session_id,)).rowcount
+        n = self.bo.x("DELETE FROM baseline_sessions WHERE session_id=?", (session_id,)).rowcount
+        self._invalidate()
+        return n
 
     def forget_user(self, user_id):
-        return self.bo.x("DELETE FROM baseline_sessions WHERE user_id=?", (user_id,)).rowcount
+        n = self.bo.x("DELETE FROM baseline_sessions WHERE user_id=?", (user_id,)).rowcount
+        self._invalidate(user_id)
+        return n

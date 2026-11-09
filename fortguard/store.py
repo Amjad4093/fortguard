@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import config
+from .incremental import FeatureState
 
 ANY_FLAGS = (
     "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software", "vpn",
@@ -37,6 +38,7 @@ class Session:
     ui: list = field(default_factory=list)
     accel: list = field(default_factory=list)
     gyro: list = field(default_factory=list)
+    fstate: object = None  # incremental feature state (incremental.FeatureState)
 
     def event_count(self):
         return len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
@@ -93,6 +95,7 @@ class SessionStore:
             if consent:
                 room = max(0, config.MAX_EVENTS_PER_SESSION - session.event_count())
                 sensors = p.get("sensor_data", {})
+                added = {}
                 for name, bucket, attr in (
                     ("touch_events", "touch", "touch"),
                     ("key_events", "key", "keys"),
@@ -100,13 +103,18 @@ class SessionStore:
                 ):
                     items = p.get(name, [])[:room]
                     getattr(session, attr).extend(items)
+                    added[attr] = items
                     kept[bucket] = len(items)
                     room -= len(items)
                 for name, attr in (("accelerometer", "accel"), ("gyroscope", "gyro")):
                     items = sensors.get(name, [])[:room]
                     getattr(session, attr).extend(items)
+                    added[attr] = items
                     kept["sensor"] += len(items)
                     room -= len(items)
+                if session.fstate is None:
+                    session.fstate = FeatureState()
+                session.fstate.update(added["touch"], added["keys"], added["ui"], added["accel"], added["gyro"])
 
             if is_new:
                 self._sessions[session.session_id] = session

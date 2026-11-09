@@ -79,6 +79,8 @@ MAX_SENSOR_PER_BATCH = 5000
 MAX_EVENTS_PER_SESSION = 50_000
 MAX_IDEMPOTENCY_ENTRIES = 100_000
 
+TREMOR_WINDOW = 512  # most recent accelerometer samples used for the tremor feature (about 10 s at 50 Hz)
+
 # --- Behavioral baselines ----------------------------------------------------------------------
 BASELINE_MIN_SESSIONS = 10      # PRD: the biometric match cannot affect decisions before this
 BASELINE_WINDOW = 30            # most recent allowed sessions kept per user

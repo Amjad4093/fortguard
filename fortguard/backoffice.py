@@ -248,6 +248,7 @@ class BackOffice:
         }
         if baselines is not None:
             out["baseline_sessions"] = self.x("DELETE FROM baseline_sessions WHERE time_ms < ?", (now - r["decisions"] * day,)).rowcount
+            baselines._invalidate()
         self.x("DELETE FROM notes WHERE case_id NOT IN (SELECT id FROM cases)")
         return out
 

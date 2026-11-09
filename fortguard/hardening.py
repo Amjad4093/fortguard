@@ -41,6 +41,8 @@ class RateLimiter:
         self._lock = threading.Lock()
 
     def allow(self, rule, key):
+        if os.environ.get("FORTGUARD_RATE_LIMITS_OFF") == "1":  # load tests only
+            return True, 0
         per_minute = config.RATE_LIMITS.get(rule)
         if not per_minute:
             return True, 0

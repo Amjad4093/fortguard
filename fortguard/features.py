@@ -143,7 +143,20 @@ def hesitation_index(touch, keys, ui):
     return min(1.0, paused / config.HESITATION_FULL_MS)
 
 
+def recent_accel(accel):
+    """The most recent TREMOR_WINDOW samples, in time order (same window as the incremental engine)."""
+    return sorted(accel, key=lambda s: s["ts"])[-config.TREMOR_WINDOW:]
+
+
 def compute_features(session):
+    """Features for a session: from the incremental state when it is valid, else from all events."""
+    state = getattr(session, "fstate", None)
+    if state is not None and not state.stale:
+        return state.features()
+    return compute_features_full(session)
+
+
+def compute_features_full(session):
     touch, keys, ui = session.touch, session.keys, session.ui
     deviations = swipe_deviations(touch)
     holds, flights = key_timings(keys)
@@ -163,7 +176,7 @@ def compute_features(session):
         "ft_accel_variance": _variance_sum(session.accel),
         "ft_gyro_variance": _variance_sum(session.gyro),
         "ft_accel_samples": len(session.accel),
-        "ft_tremor_band_ratio": tremor_band_ratio(session.accel),
+        "ft_tremor_band_ratio": tremor_band_ratio(recent_accel(session.accel)),
         "ft_pasting_frequency": sum(1 for e in pastes if e.get("field") in SENSITIVE_PASTE_FIELDS),
         "ft_paste_beneficiary_count": sum(1 for e in pastes if e.get("field") == "beneficiary_account"),
         "ft_hesitation_index": hesitation_index(touch, keys, ui),
