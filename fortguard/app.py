@@ -249,7 +249,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         feats = result.pop("_features", None)
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-        bo.record_decision(decisions.record(body, session, result, clock()))
+        bo.record_decision(decisions.record(body, session, result, clock(), feats))
         app.fortguard_metrics.decision(result["risk_level"], result.get("degraded"))
         if feats is not None and result["risk_level"] == "ALLOW":
             baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))

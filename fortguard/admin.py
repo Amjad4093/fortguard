@@ -36,7 +36,7 @@ class DecisionLog:
         self._items = deque(maxlen=maxlen)
         self._lock = threading.Lock()
 
-    def record(self, body, session, result, now_s):
+    def record(self, body, session, result, now_s, features=None):
         tx = body.get("transaction_details") or {}
         account = tx.get("beneficiary_account")
         entry = {
@@ -60,6 +60,9 @@ class DecisionLog:
             "model_version": result["model_version"],
             "latency_ms": result.get("latency_ms"),
             "baseline": result.get("baseline"),
+            # Numbers only: the behavioural measurements behind this decision, for the back office.
+            "features": {k: round(float(v), 4) for k, v in (features or {}).items()
+                         if isinstance(v, (int, float)) and not isinstance(v, bool)},
         }
         with self._lock:
             self._items.appendleft(entry)

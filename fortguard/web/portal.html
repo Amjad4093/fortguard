@@ -121,6 +121,22 @@ tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; font-size: 11.5px; overflow: auto; max-height: 300px; }
 .back { display: inline-block; margin-bottom: 10px; font-size: .9rem; }
 .banner { background: var(--step-bg); color: var(--step); border-radius: 9px; padding: 8px 12px; font-size: .85rem; margin-bottom: 14px; }
+/* Professional polish */
+.card { box-shadow: 0 1px 2px rgba(16, 23, 42, .06); }
+.card h2 { font-size: .95rem; font-weight: 650; letter-spacing: .01em; }
+.pagehead h1 { font-size: 1.35rem; font-weight: 650; letter-spacing: -.01em; }
+.tile { box-shadow: 0 1px 2px rgba(16, 23, 42, .06); }
+.tile b { font-variant-numeric: tabular-nums; font-weight: 650; }
+table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+th { text-transform: none; letter-spacing: .01em; }
+button.primary:hover { filter: brightness(1.07); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, nav a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+.sub { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 4px; font-weight: 650; }
+.sub:first-child { margin-top: 2px; }
+table.plain td { padding: 6px 0; font-size: 13.5px; white-space: normal; }
+table.plain tr:first-child td { border-top: 0; }
+.measure-note { font-size: 12px; color: var(--muted); padding: 0 16px 12px; margin: 0; }
 </style>
 </head>
 <body>
@@ -331,6 +347,31 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
       el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No cases here. Step-up and block decisions open cases automatically." })]));
   }
 
+  // Behavioural measurements stored with each decision: label, unit (% shown as a percentage) and group.
+  var FEATURE_GROUPS = [
+    ["Typing", [["ft_typing_speed_cpm", "Typing speed", "cpm"], ["ft_correction_rate", "Corrections", "%"],
+      ["ft_keystroke_flight_time_avg", "Gap between keys", "ms"], ["ft_keystroke_hold_time_avg", "Key hold time", "ms"],
+      ["ft_hesitation_index", "Hesitation", "%"], ["ft_pasting_frequency", "Sensitive pastes", ""], ["ft_paste_beneficiary_count", "Beneficiary pastes", ""]]],
+    ["Touch", [["ft_touch_count", "Touches", ""], ["ft_touch_pressure_mean", "Average pressure", ""], ["ft_touch_size_mean", "Contact size", ""],
+      ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_count", "Swipes", ""], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"]]],
+    ["Motion and device", [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""]]]
+  ];
+  function formatFeature(v, unit) {
+    if (v == null || typeof v !== "number") return "–";
+    var text = unit === "%" ? Math.round(v * 100) + "%" : (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100));
+    return unit && unit !== "%" ? text + " " + unit : text;
+  }
+  function behaviourCard(f) {
+    var blocks = FEATURE_GROUPS.map(function (g) {
+      var rows = g[1].filter(function (r) { return f[r[0]] !== undefined && f[r[0]] !== null; }).map(function (r) {
+        return el("tr", {}, [el("td", { text: r[1] }), el("td", { class: "num", text: formatFeature(f[r[0]], r[2]) })]);
+      });
+      return rows.length ? el("div", {}, [el("div", { class: "sub", text: g[0] }), el("table", { class: "plain" }, [el("tbody", {}, rows)])]) : null;
+    }).filter(Boolean);
+    return card("What FortGuard measured", blocks.length ? [el("p", { class: "measure-note", text: "Numbers only. Typed characters are never stored." })].concat(blocks)
+      : [el("div", { class: "empty", text: "No behaviour was measured for this session." })]);
+  }
+
   async function caseDetail(v, id) {
     v.appendChild(el("a", { href: "#/cases", class: "back", text: "← All cases" }));
     var c = await call("GET", "/v1/bo/cases/" + id);
@@ -351,6 +392,7 @@ pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid v
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
     var left = [card("Why FortGuard flagged it", why), card("Details", [facts])];
+    if (d.features) left.push(behaviourCard(d.features));
     if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
       return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);
     }))])]));

@@ -171,3 +171,13 @@ def test_web_platform_is_accepted_in_telemetry_environment(api, make_session, re
     batch = session["batches"][0]
     batch["environment"]["os"] = "Web"
     assert api.post("/v1/telemetry/stream", resign(batch, session))[0] == 202
+
+
+def test_decision_keeps_the_measured_numbers_and_no_text(api, make_session):
+    session = make_session("coached_scam")
+    run_session(api, session)
+    _, data = get(api, "/v1/admin/decisions")
+    feats = data["decisions"][0]["features"]
+    assert feats, "the behaviour measured for the decision is stored with it"
+    assert all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in feats.values())
+    assert "ft_accel_samples" in feats  # always measured; typing values appear only when the phone sends counts
