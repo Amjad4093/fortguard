@@ -61,6 +61,13 @@ object FortGuard {
         val environment: Map<String, Any?>,
         val motionSensors: String,
         val lastMessage: String,
+        /** Sensors this phone has, by wire name (empty before the screen starts capturing). */
+        val sensorsAvailable: List<String> = emptyList(),
+        /** Lifetime samples and events per signal name since the device started. */
+        val signals: Map<String, Long> = emptyMap(),
+        /** Lifetime characters typed and corrected (counts only, never the characters). */
+        val typedChars: Long = 0L,
+        val correctedChars: Long = 0L,
     )
 
     private val worker = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "fortguard").apply { isDaemon = true } }
@@ -204,6 +211,8 @@ object FortGuard {
             deviceGuid = engine?.deviceGuid, sessionId = engine?.sessionId, enrolledLevel = engine?.enrolledLevel,
             counts = buffer.counts(), environment = env?.let { environmentSnapshot(it) } ?: emptyMap(),
             motionSensors = sensors, lastMessage = lastMessage,
+            sensorsAvailable = m?.available() ?: emptyList(),
+            signals = buffer.signals(), typedChars = buffer.typing().first, correctedChars = buffer.typing().second,
         )
     }
 

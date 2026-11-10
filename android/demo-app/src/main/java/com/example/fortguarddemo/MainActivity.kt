@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,7 +19,9 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -27,41 +30,83 @@ import com.fortguard.sdk.core.Field
 import java.util.concurrent.Executors
 
 /**
- * FortGuard demo: a single transfer screen that uses the SDK the way a bank app would, plus test
- * controls (server address, forced conditions, attestation level) that a real app would not have.
+ * FortGuard demo bank app. It shows how a bank app uses the SDK: a sign-in, a home screen, a transfer
+ * with a live risk decision, a panel that lists every signal being captured, and a settings screen for
+ * testers (server address, simulated attestation, forced conditions).
+ *
+ * The sign-in uses a built-in test account on purpose, so testers can reach the screens. It is not a
+ * customer login. The API key is never stored in the app: testers type it in Settings.
  */
 class MainActivity : Activity() {
+
+    companion object {
+        /** Test account, built into the demo only. Not a real customer login. */
+        const val DEMO_USER = "demo"
+        const val DEMO_PASSWORD = "FortGuard@2026"
+        const val DEMO_BALANCE = "PKR 245,300.00"
+        const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
+
+        val PRIMARY = Color.rgb(11, 61, 145)
+        val NAVY = Color.rgb(8, 34, 84)
+        val ACCENT = Color.rgb(0, 168, 143)
+        val BG = Color.rgb(243, 246, 251)
+        val CARD = Color.WHITE
+        val INK = Color.rgb(27, 36, 48)
+        val MUTED = Color.rgb(107, 119, 133)
+        val OK = Color.rgb(29, 122, 70)
+        val WARN = Color.rgb(138, 90, 0)
+        val DANGER = Color.rgb(179, 38, 30)
+    }
 
     private val io = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("demo", Context.MODE_PRIVATE) }
+    private val shell by lazy { FrameLayout(this) }
+
+    private var loggedIn = false
+    private var currentTab = "home"
+    private var attestationLevel = "STRONG"
+    private var sensorsShown: List<String> = emptyList()
+    private val tabViews = HashMap<String, View>()
+    private val tabButtons = HashMap<String, TextView>()
+    private val signalValues = HashMap<String, TextView>()
+
+    private var loginView: View? = null
+    private lateinit var loginUser: EditText
+    private lateinit var loginPassword: EditText
+    private lateinit var loginError: TextView
+    private lateinit var loadingStatus: TextView
+    private lateinit var contentFrame: FrameLayout
 
     private lateinit var serverInput: EditText
     private lateinit var apiKeyInput: EditText
-    private lateinit var levelSpinner: Spinner
+    private lateinit var consent: CheckBox
     private lateinit var statusText: TextView
     private lateinit var accountInput: EditText
     private lateinit var amountInput: EditText
     private lateinit var newPayee: CheckBox
-    private lateinit var consent: CheckBox
-    private lateinit var resultText: TextView
     private lateinit var checkButton: Button
+    private lateinit var resultCard: LinearLayout
+    private lateinit var resultText: TextView
+    private lateinit var homeDecision: TextView
+    private lateinit var typingText: TextView
+    private lateinit var signalsList: LinearLayout
 
-    @Volatile private var attestationLevel = "STRONG"
+    private val refresher = object : Runnable {
+        override fun run() {
+            refreshLive()
+            ui.postDelayed(this, 1000)
+        }
+    }
 
-    private val forced = linkedMapOf(
-        "active_call" to "On a call",
-        "screen_sharing" to "Screen sharing",
-        "active_remote_software" to "Remote-access tool",
-        "is_rooted" to "Rooted",
-        "vpn" to "VPN",
-    )
+    // --- Lifecycle ---------------------------------------------------------------------------
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        setContentView(shell)
+        showSplash()
         startSdk()
-        refreshStatus()
+        waitForEnrollment(0)
     }
 
     override fun onResume() {
@@ -80,8 +125,7 @@ class MainActivity : Activity() {
     }
 
     private fun startSdk() {
-        val url = serverInput.text.toString().trim()
-        prefs.edit().putString("server", url).putString("api_key", apiKeyInput.text.toString().trim()).apply()
+        val url = prefs.getString("server", DEFAULT_SERVER)!!.trim()
         FortGuard.init(
             this,
             FortGuard.Config(
@@ -92,10 +136,411 @@ class MainActivity : Activity() {
                 allowDebugOverrides = true,
             ),
         )
-        FortGuard.setConsent(consent.isChecked)
+        FortGuard.setConsent(prefs.getBoolean("consent", true))
     }
 
-    // --- Actions ----------------------------------------------------------------------------------
+    // --- Loading and sign-in -------------------------------------------------------------------
+
+    private fun showSplash() {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(32), dp(32), dp(32), dp(32))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(NAVY, PRIMARY))
+        }
+        col.addView(text("FortGuard", 34f, Color.WHITE, bold = true))
+        col.addView(text("Secure banking demo", 15f, Color.argb(210, 255, 255, 255)).apply { setPadding(0, dp(4), 0, dp(32)) })
+        col.addView(ProgressBar(this).apply { isIndeterminate = true })
+        loadingStatus = text("Starting...", 14f, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, 0) }
+        col.addView(loadingStatus)
+        shell.removeAllViews()
+        shell.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    }
+
+    private fun waitForEnrollment(tries: Int) {
+        val s = FortGuard.status()
+        if (s.enrolledLevel != null) {
+            loadingStatus.text = "Secure session ready"
+            ui.postDelayed({ showLogin() }, 500)
+            return
+        }
+        if (tries >= 25) {
+            loadingStatus.text = "Could not reach the server. You can still sign in and fix the address in Settings."
+            ui.postDelayed({ showLogin() }, 1500)
+            return
+        }
+        loadingStatus.text = if (s.deviceGuid == null) "Checking this phone..." else "Enrolling this phone with the server..."
+        ui.postDelayed({ waitForEnrollment(tries + 1) }, 400)
+    }
+
+    private fun showLogin() {
+        if (loggedIn) return showMain()
+        val view = loginView ?: buildLogin().also { loginView = it }
+        shell.removeAllViews()
+        shell.addView(view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    }
+
+    private fun buildLogin(): View {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(40), dp(20), dp(24))
+            setBackgroundColor(BG)
+        }
+        col.addView(text("FortGuard", 28f, PRIMARY, bold = true))
+        col.addView(text("Sign in to your account", 15f, MUTED).apply { setPadding(0, dp(2), 0, dp(20)) })
+
+        val box = card()
+        loginUser = input("Username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        loginPassword = input("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        FortGuard.watch(loginUser, Field.USERNAME)
+        FortGuard.watch(loginPassword, Field.PASSWORD)
+        box.addView(label("Username")); box.addView(loginUser)
+        box.addView(label("Password")); box.addView(loginPassword)
+        loginError = text("", 13f, DANGER).apply { setPadding(0, dp(8), 0, 0) }
+        box.addView(loginError)
+        box.addView(primaryButton("Sign in") { signIn() }, lp(top = 12))
+        col.addView(box, lp(bottom = 16))
+
+        val demo = card()
+        demo.addView(text("Test account", 13f, INK, bold = true))
+        demo.addView(text("Username: $DEMO_USER\nPassword: $DEMO_PASSWORD", 13f, MUTED).apply { setPadding(0, dp(4), 0, 0) })
+        demo.addView(text("Built into this demo so testers can reach every screen. It is not a customer login.", 12f, MUTED).apply { setPadding(0, dp(6), 0, 0) })
+        col.addView(demo)
+
+        return ScrollView(this).apply { setBackgroundColor(BG); addView(col) }
+    }
+
+    private fun signIn() {
+        val ok = loginUser.text.toString().trim() == DEMO_USER && loginPassword.text.toString() == DEMO_PASSWORD
+        if (!ok) {
+            loginError.text = "Wrong username or password."
+            return
+        }
+        loggedIn = true
+        loginPassword.setText("")
+        loginError.text = ""
+        showMain()
+    }
+
+    private fun signOut() {
+        loggedIn = false
+        currentTab = "home"
+        ui.removeCallbacks(refresher)
+        showLogin()
+    }
+
+    // --- Main shell with four tabs ----------------------------------------------------------------
+
+    private fun showMain() {
+        shell.removeAllViews()
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG) }
+        contentFrame = FrameLayout(this)
+        col.addView(contentFrame, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(CARD)
+            elevation = dp(6).toFloat()
+        }
+        for ((key, label) in listOf("home" to "Home", "transfer" to "Send", "signals" to "Signals", "settings" to "Settings")) {
+            val tab = TextView(this).apply {
+                text = label
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(14), 0, dp(14))
+                setOnClickListener { selectTab(key) }
+            }
+            tabButtons[key] = tab
+            bar.addView(tab, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        }
+        col.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        shell.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        selectTab(currentTab)
+        ui.removeCallbacks(refresher)
+        ui.post(refresher)
+    }
+
+    private fun selectTab(key: String) {
+        currentTab = key
+        val view = tabViews[key] ?: when (key) {
+            "home" -> buildHome()
+            "transfer" -> buildTransfer()
+            "signals" -> buildSignals()
+            else -> buildSettings()
+        }.also { tabViews[key] = it }
+        contentFrame.removeAllViews()
+        contentFrame.addView(view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        for ((k, tab) in tabButtons) {
+            tab.setTextColor(if (k == key) PRIMARY else MUTED)
+            tab.setTypeface(null, if (k == key) Typeface.BOLD else Typeface.NORMAL)
+        }
+        refreshLive()
+    }
+
+    private fun buildHome(): View {
+        val col = column()
+        col.addView(text("Hello, $DEMO_USER", 22f, INK, bold = true))
+        col.addView(text("Your accounts", 14f, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+
+        val balance = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(PRIMARY, NAVY)).apply { cornerRadius = dp(16).toFloat() }
+        }
+        balance.addView(text("Current account", 13f, Color.argb(220, 255, 255, 255)))
+        balance.addView(text(DEMO_BALANCE, 26f, Color.WHITE, bold = true).apply { setPadding(0, dp(6), 0, dp(12)) })
+        balance.addView(text("Protected by FortGuard", 12f, ACCENT, bold = true))
+        col.addView(balance, lp(bottom = 16))
+
+        val decision = card()
+        decision.addView(text("Latest security check", 15f, INK, bold = true))
+        homeDecision = text("No transfer checked yet. Send money to see a live decision.", 14f, MUTED).apply { setPadding(0, dp(6), 0, 0) }
+        decision.addView(homeDecision)
+        col.addView(decision, lp(bottom = 16))
+
+        col.addView(row(
+            primaryButton("Send money") { selectTab("transfer") },
+            outlineButton("See signals") { selectTab("signals") },
+        ))
+        col.addView(text("Typed text never leaves this phone. Only timing and character counts are sent.", 12f, MUTED).apply { setPadding(0, dp(16), 0, 0) })
+        return scroll(col)
+    }
+
+    private fun buildTransfer(): View {
+        val col = column()
+        col.addView(text("Send money", 22f, INK, bold = true).apply { setPadding(0, 0, 0, dp(12)) })
+        val form = card()
+        accountInput = input("Beneficiary account (IBAN)", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
+        amountInput = input("Amount in PKR", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        FortGuard.watch(accountInput, Field.BENEFICIARY_ACCOUNT)
+        FortGuard.watch(amountInput, Field.AMOUNT)
+        form.addView(label("Beneficiary account")); form.addView(accountInput)
+        form.addView(label("Amount (PKR)")); form.addView(amountInput)
+        newPayee = CheckBox(this).apply { text = "New beneficiary"; isChecked = true; setTextColor(INK) }
+        form.addView(newPayee, lp(top = 8))
+        checkButton = primaryButton("Check risk and send") { checkRisk() }
+        form.addView(checkButton, lp(top = 12))
+        col.addView(form, lp(bottom = 16))
+
+        resultCard = card()
+        resultText = text("Enter the details and press the button. FortGuard decides before the money moves.", 14f, MUTED)
+        resultCard.addView(resultText)
+        col.addView(resultCard)
+        return scroll(col)
+    }
+
+    private fun buildSignals(): View {
+        val col = column()
+        col.addView(text("What FortGuard sees", 22f, INK, bold = true))
+        col.addView(text("Every signal this phone can provide. Values update every second while you use the app.", 13f, MUTED).apply { setPadding(0, dp(2), 0, dp(12)) })
+        val typing = card()
+        typingText = text("", 14f, INK)
+        typing.addView(typingText)
+        col.addView(typing, lp(bottom = 12))
+        signalsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(signalsList)
+        return scroll(col)
+    }
+
+    private fun buildSettings(): View {
+        val col = column()
+        col.addView(text("Settings", 22f, INK, bold = true).apply { setPadding(0, 0, 0, dp(12)) })
+
+        val server = card()
+        server.addView(text("Test server", 15f, INK, bold = true))
+        serverInput = input("https://your-server", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        serverInput.setText(prefs.getString("server", DEFAULT_SERVER))
+        apiKeyInput = input("API key from the server", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        apiKeyInput.setText(prefs.getString("api_key", ""))
+        server.addView(label("Server address")); server.addView(serverInput)
+        server.addView(label("API key (your bank's server key, typed here, never stored in the app)")); server.addView(apiKeyInput)
+        val levels = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("STRONG", "DEVICE", "BASIC"))
+        val spinner = Spinner(this).apply {
+            adapter = levels
+            setSelection(levels.getPosition(attestationLevel))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    attestationLevel = parent?.getItemAtPosition(position)?.toString() ?: "STRONG"
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+        }
+        server.addView(label("Attestation level (simulated by a dev server)")); server.addView(spinner)
+        consent = CheckBox(this).apply {
+            text = "Customer consents to behavioural capture"
+            isChecked = prefs.getBoolean("consent", true)
+            setTextColor(INK)
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("consent", on).apply(); FortGuard.setConsent(on) }
+        }
+        server.addView(consent, lp(top = 8))
+        server.addView(row(
+            primaryButton("Save and connect") {
+                prefs.edit().putString("server", serverInput.text.toString().trim())
+                    .putString("api_key", apiKeyInput.text.toString().trim()).apply()
+                startSdk()
+                toast("Saved. Connected to ${serverInput.text.toString().trim()}")
+            },
+            outlineButton("Re-enroll") { FortGuard.reenroll { o -> toast(o.message) } },
+        ), lp(top = 12))
+        col.addView(server, lp(bottom = 12))
+
+        val device = card()
+        device.addView(text("Device", 15f, INK, bold = true))
+        statusText = text("", 13f, INK).apply { setPadding(0, dp(6), 0, 0); setTextIsSelectable(true) }
+        device.addView(statusText)
+        device.addView(row(
+            outlineButton("New session") { FortGuard.newSession(); toast("New session started") },
+            outlineButton("Last batch") { showLastBatch() },
+        ), lp(top = 10))
+        device.addView(row(
+            outlineButton("Reset device") { FortGuard.resetDevice(this@MainActivity); startSdk(); toast("Device reset") },
+        ), lp(top = 6))
+        col.addView(device, lp(bottom = 12))
+
+        val forced = card()
+        forced.addView(text("Force conditions (testing only)", 15f, INK, bold = true))
+        forced.addView(text("The SDK detects these itself. Ticking a box forces the server to see it, to test its rules.", 12f, MUTED))
+        listOf(
+            "active_call" to "On a call",
+            "screen_sharing" to "Screen sharing",
+            "active_remote_software" to "Remote-access tool",
+            "is_rooted" to "Rooted",
+            "vpn" to "VPN",
+        ).forEach { (key, caption) ->
+            forced.addView(CheckBox(this).apply {
+                this.text = caption
+                setTextColor(INK)
+                setOnCheckedChangeListener { _, on -> if (on) FortGuard.debugOverrides[key] = true else FortGuard.debugOverrides.remove(key) }
+            })
+        }
+        col.addView(forced, lp(bottom = 12))
+
+        col.addView(outlineButton("Sign out") { signOut() })
+        return scroll(col)
+    }
+
+    // --- Live updates ---------------------------------------------------------------------------
+
+    private fun refreshLive() {
+        val s = FortGuard.status()
+        if (::statusText.isInitialized) {
+            statusText.text = buildString {
+                append("Device: ${s.deviceGuid ?: "starting"}\n")
+                append("Enrollment: ${s.enrolledLevel?.let { "enrolled, attestation $it (simulated)" } ?: "not yet"}\n")
+                append("Session: ${s.sessionId ?: "-"}\n")
+                append("Motion sensors: ${s.motionSensors}\n")
+                append("Last: ${s.lastMessage}")
+            }
+        }
+        if (currentTab == "signals" && ::signalsList.isInitialized) renderSignals(s)
+    }
+
+    private fun renderSignals(s: FortGuard.Status) {
+        if (::typingText.isInitialized) {
+            typingText.text = "Characters typed: ${s.typedChars}   Corrected: ${s.correctedChars}\n" +
+                "Counts only. The characters themselves are never read or sent."
+        }
+        if (s.sensorsAvailable != sensorsShown) {
+            sensorsShown = s.sensorsAvailable
+            signalsList.removeAllViews()
+            signalValues.clear()
+            signalGroups().forEach { (title, items) ->
+                signalsList.addView(text(title, 16f, INK, bold = true).apply { setPadding(0, dp(12), 0, dp(6)) })
+                val box = card()
+                items.forEachIndexed { i, (name, desc) ->
+                    if (i > 0) box.addView(divider())
+                    box.addView(signalRow(name, desc))
+                }
+                signalsList.addView(box)
+            }
+        }
+        for ((name, value) in signalValues) {
+            val (msg, active) = valueFor(name, s)
+            value.text = msg
+            value.setTextColor(if (active) OK else MUTED)
+        }
+    }
+
+    private fun signalGroups(): List<Pair<String, List<Pair<String, String>>>> = listOf(
+        "Touch and gestures" to listOf("touch" to "Touch points with position, pressure and contact size"),
+        "Typing" to listOf(
+            "keystrokes" to "Keystroke timing per field, with typed and corrected counts",
+            "ui_events" to "Focus, paste and submit events (field names only)",
+        ),
+        "Motion sensors" to listOf(
+            "accelerometer" to "Acceleration on three axes",
+            "gyroscope" to "Rotation rate",
+            "magnetometer" to "Compass heading and magnetic field",
+            "gravity" to "Direction of gravity, how the phone is held",
+            "linear_acceleration" to "Movement without gravity",
+            "rotation_vector" to "Device orientation",
+            "light" to "Ambient light",
+            "proximity" to "Phone near the face or ear",
+            "pressure" to "Air pressure (barometer)",
+        ),
+        "Device facts" to listOf(
+            "battery_level" to "Battery level (%)",
+            "charging" to "Charging",
+            "network_type" to "Network: Wi-Fi, mobile or none",
+            "locale" to "Language and region",
+            "timezone" to "Time zone",
+            "screen_width" to "Screen width (pixels)",
+            "screen_height" to "Screen height (pixels)",
+            "density" to "Screen density",
+            "app_install_age_days" to "Days since the app was installed",
+            "free_storage_mb" to "Free storage (MB)",
+        ),
+        "Environment checks" to listOf(
+            "is_rooted" to "Rooted device",
+            "is_emulator" to "Emulator",
+            "has_hooking_framework" to "Hooking framework",
+            "active_remote_software" to "Remote-access app running",
+            "screen_sharing" to "Screen being shared",
+            "active_call" to "Phone call in progress",
+            "vpn" to "VPN active",
+        ),
+    )
+
+    /** The value to show for one signal, and whether it is active right now. */
+    private fun valueFor(name: String, s: FortGuard.Status): Pair<String, Boolean> {
+        s.signals[name]?.let { n -> if (n > 0) return "$n captured" to true }
+        if (name in s.sensorsAvailable) return "ready, waiting for data" to false
+        if (name in listOf("accelerometer", "gyroscope", "magnetometer", "gravity", "linear_acceleration",
+                "rotation_vector", "light", "proximity", "pressure")) return "not on this phone" to false
+        if (name in listOf("touch", "keystrokes", "ui_events")) return "waiting for input" to false
+        val v = s.environment[name] ?: return "not reported yet" to false
+        return when (v) {
+            is Boolean -> when (name) {
+                "charging", "is_emulator" -> (if (v) "yes" else "no") to v
+                else -> (if (v) "detected" else "clear") to !v
+            }
+            is Number -> when (name) {
+                "battery_level" -> "$v%" to true
+                "free_storage_mb" -> "$v MB" to true
+                "app_install_age_days" -> "$v days" to true
+                else -> v.toString() to true
+            }
+            else -> v.toString() to true
+        }
+    }
+
+    private fun signalRow(name: String, desc: String): LinearLayout {
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        left.addView(text(name.replace('_', ' '), 14f, INK, bold = true))
+        left.addView(text(desc, 12f, MUTED))
+        item.addView(left, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        val value = text("...", 13f, MUTED).apply { gravity = Gravity.END }
+        item.addView(value)
+        signalValues[name] = value
+        return item
+    }
+
+    // --- Transfer --------------------------------------------------------------------------------
 
     private fun checkRisk() {
         val account = accountInput.text.toString().trim()
@@ -103,8 +548,7 @@ class MainActivity : Activity() {
         if (account.length !in 8..40) { showError("Enter a beneficiary account of 8 to 40 characters."); return }
         if (amount == null || amount <= 0) { showError("Enter an amount greater than zero."); return }
         checkButton.isEnabled = false
-        resultText.text = "Sending telemetry and asking for a decision..."
-        resultText.setTextColor(Color.DKGRAY)
+        showNeutral("Sending telemetry and asking FortGuard for a decision...")
         FortGuard.submit { outcome ->
             if (!outcome.ok) {
                 checkButton.isEnabled = true
@@ -112,10 +556,11 @@ class MainActivity : Activity() {
                 return@submit
             }
             val session = FortGuard.sessionId ?: return@submit
-            val url = serverInput.text.toString().trim()
-            val key = apiKeyInput.text.toString().trim()
+            val url = prefs.getString("server", DEFAULT_SERVER)!!.trim()
+            val key = prefs.getString("api_key", "")!!.trim()
+            val userId = userId()
             io.execute {
-                val result = DemoBackend.evaluate(url, key, session, userId(), amount, account, newPayee.isChecked)
+                val result = DemoBackend.evaluate(url, key, session, userId, amount, account, newPayee.isChecked)
                 ui.post {
                     checkButton.isEnabled = true
                     result.fold(::showDecision) { showError("Evaluate failed: ${it.message}") }
@@ -125,46 +570,44 @@ class MainActivity : Activity() {
     }
 
     private fun showDecision(d: DemoBackend.Decision) {
+        val level = d.level
+        val tone = levelColor(level)
         val sb = StringBuilder()
-        sb.append("${d.level.replace('_', ' ')}   ${d.score} / 1000\n")
+        sb.append("${level.replace('_', ' ')}   ${d.score} / 1000\n")
         sb.append("${DemoBackend.ACTIONS[d.action] ?: d.action}\n\n")
         if (d.breakdown.isEmpty()) sb.append("No risk signals fired.\n")
         d.breakdown.forEach { (reason, points) -> sb.append("+$points  ${DemoBackend.REASONS[reason] ?: reason}\n") }
         sb.append("\nBot ${pct(d.botProbability)}, coercion ${pct(d.coercionProbability)}, remote tool ${if (d.remoteTool) "yes" else "no"}. Scored in ${d.latencyMs} ms.")
         resultText.text = sb.toString()
-        resultText.setTextColor(when (d.level) {
-            "ALLOW" -> Color.rgb(29, 122, 70)
-            "STEP_UP" -> Color.rgb(138, 90, 0)
-            else -> Color.rgb(179, 38, 30)
-        })
+        resultText.setTextColor(tone)
+        resultCard.background = rounded(tint(tone), 14)
+        if (::homeDecision.isInitialized) {
+            homeDecision.text = "${level.replace('_', ' ')} (score ${d.score}). ${DemoBackend.ACTIONS[d.action] ?: d.action}"
+            homeDecision.setTextColor(tone)
+        }
     }
 
-    private fun showError(message: String) {
+    private fun showError(message: String) = showNeutral(message, DANGER)
+
+    private fun showNeutral(message: String, color: Int = MUTED) {
         resultText.text = message
-        resultText.setTextColor(Color.rgb(179, 38, 30))
+        resultText.setTextColor(color)
+        resultCard.background = rounded(CARD, 14)
     }
+
+    private fun levelColor(level: String) = when (level) {
+        "ALLOW" -> OK
+        "STEP_UP" -> WARN
+        else -> DANGER
+    }
+
+    private fun tint(c: Int): Int = Color.argb(28, Color.red(c), Color.green(c), Color.blue(c))
 
     private fun pct(v: Double) = "${Math.round(v * 100)}%"
 
     private fun userId(): String =
         prefs.getString("user", null) ?: ("usr_" + java.util.UUID.randomUUID().toString().replace("-", "").take(10))
             .also { prefs.edit().putString("user", it).apply() }
-
-    private fun refreshStatus() {
-        val s = FortGuard.status()
-        val env = s.environment.filterKeys { it != "os" && it != "os_version" }
-            .filterValues { it == true }.keys.joinToString().ifEmpty { "nothing flagged" }
-        statusText.text = buildString {
-            append("Device: ${s.deviceGuid ?: "starting"}\n")
-            append("Enrollment: ${s.enrolledLevel?.let { "enrolled, attestation $it (simulated)" } ?: "not yet"}\n")
-            append("Session: ${s.sessionId ?: "-"}\n")
-            append("Motion sensors: ${s.motionSensors}\n")
-            append("Captured: ${s.counts.touch} touch, ${s.counts.keys} edits, ${s.counts.ui} UI, ${s.counts.sensor} motion\n")
-            append("Device checks: $env\n")
-            append("Last: ${s.lastMessage}")
-        }
-        ui.postDelayed(::refreshStatus, 1000)
-    }
 
     private fun showLastBatch() {
         val json = FortGuard.lastBatchJson() ?: "Nothing sent yet."
@@ -183,90 +626,92 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // --- Layout (plain views, no extra libraries) ------------------------------------------------------
-
-    private fun buildUi(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(32))
-        }
-        root.addView(heading("FortGuard demo"))
-        root.addView(note("Test app for the FortGuard SDK. Attestation is simulated by a server running with --dev. Typed text never leaves the phone: only edit timing and the field name."))
-
-        root.addView(section("Server"))
-        serverInput = input(prefs.getString("server", "http://192.168.1.100:8080")!!, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
-        root.addView(label("FortGuard server address")); root.addView(serverInput)
-        apiKeyInput = input(prefs.getString("api_key", "dev-only-api-key")!!, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
-        root.addView(label("API key (plays the bank's server; a real app never holds it)")); root.addView(apiKeyInput)
-        levelSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("STRONG", "DEVICE", "BASIC"))
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    attestationLevel = parent?.getItemAtPosition(position)?.toString() ?: "STRONG"
-                }
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            }
-        }
-        root.addView(label("Attestation level the dev server grants")); root.addView(levelSpinner)
-        root.addView(row(
-            button("Connect") { startSdk(); resultText.text = "" },
-            button("Re-enroll") { FortGuard.reenroll { o -> resultText.text = o.message; resultText.setTextColor(Color.DKGRAY) } },
-        ))
-
-        root.addView(section("Status"))
-        statusText = TextView(this).apply { textSize = 13f; setTextIsSelectable(true) }
-        root.addView(statusText)
-        root.addView(row(
-            button("New session") { accountInput.setText(""); amountInput.setText(""); FortGuard.newSession(); resultText.text = "" },
-            button("Last batch") { showLastBatch() },
-            button("Reset device") { FortGuard.resetDevice(this); startSdk() },
-        ))
-
-        root.addView(section("Force conditions (testing only)"))
-        root.addView(note("The SDK detects these itself. Ticking a box forces it on, to test the server's rules. It cannot hide a real detection."))
-        forced.forEach { (key, text) ->
-            root.addView(CheckBox(this).apply {
-                this.text = text
-                setOnCheckedChangeListener { _, on -> if (on) FortGuard.debugOverrides.put(key, true) else FortGuard.debugOverrides.remove(key) }
-            })
-        }
-        consent = CheckBox(this).apply {
-            text = "User consents to behavioral capture"
-            isChecked = true
-            setOnCheckedChangeListener { _, on -> FortGuard.setConsent(on) }
-        }
-        root.addView(consent)
-
-        root.addView(section("Transfer"))
-        accountInput = input("", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS).apply { hint = "PK36EXMP00992201029381" }
-        root.addView(label("Beneficiary account")); root.addView(accountInput)
-        amountInput = input("", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply { hint = "250000" }
-        root.addView(label("Amount (PKR)")); root.addView(amountInput)
-        newPayee = CheckBox(this).apply { text = "New beneficiary"; isChecked = true }
-        root.addView(newPayee)
-        FortGuard.watch(accountInput, Field.BENEFICIARY_ACCOUNT)
-        FortGuard.watch(amountInput, Field.AMOUNT)
-        checkButton = button("Check risk") { checkRisk() }
-        root.addView(checkButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
-
-        resultText = TextView(this).apply { textSize = 15f; setPadding(0, dp(16), 0, 0); setTextIsSelectable(true) }
-        root.addView(resultText)
-
-        return ScrollView(this).apply { addView(root) }
-    }
+    // --- Small view helpers (plain views, no extra libraries) ------------------------------------
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun heading(t: String) = TextView(this).apply { text = t; textSize = 22f; setTypeface(typeface, Typeface.BOLD) }
-    private fun section(t: String) = TextView(this).apply {
-        text = t; textSize = 17f; setTypeface(typeface, Typeface.BOLD); setPadding(0, dp(20), 0, dp(4))
+
+    private fun rounded(color: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+        if (stroke != null) setStroke(dp(1), stroke)
     }
-    private fun label(t: String) = TextView(this).apply { text = t; textSize = 13f; setPadding(0, dp(8), 0, 0) }
-    private fun note(t: String) = TextView(this).apply { text = t; textSize = 13f; setTextColor(Color.GRAY); setPadding(0, dp(4), 0, dp(4)) }
-    private fun input(value: String, type: Int) = EditText(this).apply { setText(value); inputType = type; setSingleLine(true) }
-    private fun button(t: String, onClick: () -> Unit) = Button(this).apply { text = t; setOnClickListener { onClick() } }
+
+    private fun text(t: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        this.text = t
+        textSize = size
+        setTextColor(color)
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+    }
+
+    private fun label(t: String) = TextView(this).apply {
+        text = t
+        textSize = 13f
+        setTextColor(MUTED)
+        setPadding(0, dp(10), 0, dp(2))
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(CARD, 14)
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+        elevation = dp(2).toFloat()
+    }
+
+    private fun column() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(16), dp(16), dp(24))
+    }
+
+    private fun scroll(child: View): View = ScrollView(this).apply {
+        setBackgroundColor(BG)
+        addView(child)
+    }
+
+    private fun input(hint: String, type: Int) = EditText(this).apply {
+        this.hint = hint
+        inputType = type
+        setSingleLine(true)
+        setTextColor(INK)
+        setHintTextColor(Color.rgb(160, 168, 178))
+        background = rounded(Color.rgb(248, 250, 253), 10, Color.rgb(200, 208, 220))
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+    }
+
+    private fun primaryButton(t: String, onClick: () -> Unit) = Button(this).apply {
+        text = t
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        background = rounded(PRIMARY, 12)
+        setOnClickListener { onClick() }
+    }
+
+    private fun outlineButton(t: String, onClick: () -> Unit) = Button(this).apply {
+        text = t
+        isAllCaps = false
+        setTextColor(PRIMARY)
+        background = rounded(CARD, 12, PRIMARY)
+        setOnClickListener { onClick() }
+    }
+
     private fun row(vararg views: View) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        views.forEach { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        views.forEachIndexed { i, v ->
+            addView(v, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = dp(8) })
+        }
+    }
+
+    private fun divider() = View(this).apply {
+        setBackgroundColor(Color.rgb(230, 234, 240))
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(1))
+    }
+
+    private fun lp(top: Int = 0, bottom: Int = 0) = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+        topMargin = dp(top)
+        bottomMargin = dp(bottom)
+    }
+
+    private fun toast(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 }

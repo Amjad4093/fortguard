@@ -15,8 +15,8 @@ data class Counts(val touch: Int, val keys: Int, val ui: Int, val sensor: Int, v
 /**
  * Thread-safe buffer of behavioral events waiting to be sent.
  *
- * Privacy by construction: the methods take an event type, a time and a field, never text. There is
- * no way to put a typed character into a key event.
+ * Privacy by construction: the methods take an event type, a time, a field and character counts,
+ * never text. There is no way to put a typed character into any event.
  */
 class EventBuffer(
     private val maxTouch: Int = 4000,
@@ -33,14 +33,24 @@ class EventBuffer(
     private var totals = IntArray(4)
     private var dropped = 0
 
+    // Lifetime figures for the on-screen panel. They are not cleared when a batch is sent.
+    private val seen = LinkedHashMap<String, Long>()
+    private var typedChars = 0L
+    private var correctedChars = 0L
+
     @Volatile var enabled: Boolean = true
 
-    private fun add(list: ArrayList<Map<String, Any?>>, cap: Int, item: Map<String, Any?>, slot: Int) {
+    private fun bump(name: String) {
+        seen[name] = (seen[name] ?: 0L) + 1L
+    }
+
+    private fun add(list: ArrayList<Map<String, Any?>>, cap: Int, item: Map<String, Any?>, slot: Int, name: String) {
         if (!enabled) return
         synchronized(this) {
             if (list.size >= cap) { dropped++; return }
             list.add(item)
             totals[slot]++
+            bump(name)
         }
     }
 
@@ -49,7 +59,7 @@ class EventBuffer(
         add(touch, maxTouch, mapOf(
             "event_type" to type, "x" to x.coerceIn(-9999.0, 9999.0), "y" to y.coerceIn(-9999.0, 9999.0),
             "pressure" to pressure.coerceIn(0.0, 2.0), "size" to size.coerceIn(0.0, 1000.0), "timestamp_ms" to ts,
-        ), 0)
+        ), 0, "touch")
     }
 
     /**
@@ -64,17 +74,21 @@ class EventBuffer(
         item["field"] = field.wire
         if (inserted > 0) item["inserted"] = inserted.coerceAtMost(1000)
         if (deleted > 0) item["deleted"] = deleted.coerceAtMost(1000)
-        add(keys, maxKeys, item, 1)
+        add(keys, maxKeys, item, 1, "keystrokes")
+        if (enabled) synchronized(this) {
+            typedChars += inserted.coerceAtMost(1000)
+            correctedChars += deleted.coerceAtMost(1000)
+        }
     }
 
     fun ui(type: String, field: Field, ts: Long) {
         require(type == "FOCUS" || type == "PASTE" || type == "SUBMIT")
-        add(ui, maxUi, mapOf("event_type" to type, "field" to field.wire, "ts" to ts), 2)
+        add(ui, maxUi, mapOf("event_type" to type, "field" to field.wire, "ts" to ts), 2, "ui_events")
     }
 
-    fun accel(x: Double, y: Double, z: Double, ts: Long) = add(accel, maxSensor, sample(x, y, z, ts), 3)
+    fun accel(x: Double, y: Double, z: Double, ts: Long) = add(accel, maxSensor, sample(x, y, z, ts), 3, "accelerometer")
 
-    fun gyro(x: Double, y: Double, z: Double, ts: Long) = add(gyro, maxSensor, sample(x, y, z, ts), 3)
+    fun gyro(x: Double, y: Double, z: Double, ts: Long) = add(gyro, maxSensor, sample(x, y, z, ts), 3, "gyroscope")
 
     /** Any other sensor, by its wire name (for example "magnetometer"). Shares the sensor cap. */
     fun sensor(name: String, x: Double, y: Double, z: Double, ts: Long) {
@@ -84,6 +98,7 @@ class EventBuffer(
             if (totals[3] >= maxSensor) { dropped++; return }
             list.add(sample(x, y, z, ts))
             totals[3]++
+            bump(name)
         }
     }
 
@@ -114,7 +129,14 @@ class EventBuffer(
     fun clear() = synchronized(this) {
         touch.clear(); keys.clear(); ui.clear(); accel.clear(); gyro.clear(); extra.clear()
         totals = IntArray(4); dropped = 0
+        seen.clear(); typedChars = 0L; correctedChars = 0L
     }
 
     fun counts(): Counts = synchronized(this) { Counts(totals[0], totals[1], totals[2], totals[3], dropped) }
+
+    /** Lifetime number of samples or events seen per signal name, for the on-screen panel. */
+    fun signals(): Map<String, Long> = synchronized(this) { LinkedHashMap(seen) }
+
+    /** Lifetime characters typed and corrected (counts only). */
+    fun typing(): Pair<Long, Long> = synchronized(this) { Pair(typedChars, correctedChars) }
 }
