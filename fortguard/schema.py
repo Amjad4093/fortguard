@@ -23,10 +23,11 @@ TOP_REQUIRED = ("session_id", "device_guid", "app_id", "timestamp_ms", "nonce", 
 
 ENV_BOOLS = (
     "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software",
-    "screen_sharing", "active_call", "vpn", "mock_location",
+    "screen_sharing", "active_call", "cellular_call", "vpn", "mock_location",
 )
 ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "battery_level": (0, 100, True),
+    "network_changes": (0, 100000, True),
     "screen_width": (1, 10000, True),
     "screen_height": (1, 10000, True),
     "density": (0.5, 6.0, False),
@@ -37,7 +38,7 @@ DEVICE_MODEL_RE = re.compile(r"^[A-Za-z0-9 _\-.()/+]{1,80}$")  # e.g. "Pixel 8",
 CUSTOMER_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
 TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
-ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone"}
+ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone", "location"}
                | set(ENV_EXTRA_NUMBERS))
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
@@ -156,6 +157,16 @@ def validate_telemetry(p):
                 _fail("invalid_request", f"environment.{name} must be a whole number")
             if not low <= value <= high:
                 _fail("invalid_request", f"environment.{name} is out of range")
+    if "location" in env:  # optional, only when the customer shared their approximate location
+        loc = env["location"]
+        if not isinstance(loc, dict) or set(loc) - {"lat", "lng", "accuracy_m", "fix_age_s"}:
+            _fail("invalid_request", "environment.location must hold lat, lng and optionally accuracy_m, fix_age_s")
+        for key, low, high in (("lat", -90, 90), ("lng", -180, 180), ("accuracy_m", 0, 100000), ("fix_age_s", 0, 86400)):
+            if key not in loc and key in ("lat", "lng"):
+                _fail("invalid_request", f"environment.location.{key} is required")
+            if key in loc and (isinstance(loc[key], bool) or not isinstance(loc[key], (int, float))
+                               or not low <= loc[key] <= high):
+                _fail("invalid_request", f"environment.location.{key} is out of range")
     if "network_type" in env and env["network_type"] not in config.NETWORK_TYPES:
         _fail("invalid_request", f"environment.network_type must be one of {list(config.NETWORK_TYPES)}")
     if "locale" in env and (not isinstance(env["locale"], str) or not LOCALE_RE.match(env["locale"])):

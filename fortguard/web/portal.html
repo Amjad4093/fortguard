@@ -509,7 +509,7 @@ tr.link { cursor: pointer; }
   var SIGNAL_LABEL = {};
   SIGNALS.forEach(function (s) { SIGNAL_LABEL[s[0]] = s[1]; });
   var ENV_FLAGS = [["is_rooted", "Rooted or jailbroken"], ["is_emulator", "Emulator"], ["has_hooking_framework", "Hooking framework"],
-    ["active_remote_software", "Remote-control app running"], ["screen_sharing", "Screen being shared"], ["active_call", "Call in progress"],
+    ["active_remote_software", "Remote-control app running"], ["screen_sharing", "Screen being shared"], ["active_call", "Call in progress"], ["cellular_call", "Phone (GSM) call"],
     ["vpn", "VPN on"], ["mock_location", "Mock location on"]];
 
   function formatFeature(v, unit) {
@@ -582,13 +582,19 @@ tr.link { cursor: pointer; }
     var f = d.features || {};
     if (!e && !d.features) return noData("Device and environment", "Not recorded for this decision.");
     e = e || {};
+    var n = d.network || {};
     var rows = [
       ["Operating system", e.os ? e.os + (e.os_version ? " " + e.os_version : "") : null],
       ["Battery", e.battery_level != null ? e.battery_level + "%" + (e.charging ? ", charging" : "") : null],
       ["Network", e.network_type],
       ["Screen", e.screen_width ? e.screen_width + " × " + e.screen_height : null],
       ["Free storage", e.free_storage_mb != null ? (e.free_storage_mb / 1024).toFixed(1) + " GB" : null],
-      ["App installed for", e.app_install_age_days != null ? e.app_install_age_days + " days" : null]
+      ["App installed for", e.app_install_age_days != null ? e.app_install_age_days + " days" : null],
+      ["Network switches in session", e.network_changes != null ? String(e.network_changes) : null],
+      ["Client IP address", n.ip || null],
+      ["IP address changes in session", n.ip != null ? String(n.ip_changes || 0) : null],
+      ["Approximate location", n.location ? n.location.lat + ", " + n.location.lng + " (about 1 km)" : null],
+      ["Location jump detected", n.location_jump != null ? (n.location_jump ? "Yes" : "No") : null]
     ].concat(ENV_FLAGS.filter(function (fl) { return fl[0] in e; }).map(function (fl) { return [fl[1], e[fl[0]] ? "Yes" : "No"]; }));
     var motion = featureRows(f, [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""]]);
     var kids = [kvList(rows) || el("div", { class: "empty", text: "No device facts were sent." })];
@@ -808,7 +814,7 @@ tr.link { cursor: pointer; }
         if (!confirm("Revoke " + d.device_guid + "?")) return;
         try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(d.device_guid) + "/revoke"); route(); } catch (e) { say(e.message, true); }
       } }) : null;
-      return el("tr", {}, [el("td", {}, [el("div", { text: d.model || "Model not reported yet" }), el("small", { class: "mono", text: short(d.device_guid, 18) })]),
+      return el("tr", {}, [el("td", {}, [el("div", { text: d.model || "Model not reported yet" }), el("small", { class: "mono", text: short(d.device_guid, 18) }), el("small", { class: "mono", text: d.last_ip ? "IP " + d.last_ip : "" })]),
         el("td", { text: (d.os || d.platform) + (d.os_version ? " " + d.os_version : "") }), el("td", { text: d.app_id }),
         el("td", { text: d.integrity_level || "–" }), el("td", { text: d.owner_enrolled ? "Yes" : "No" }),
         el("td", { text: (d.customers || []).join(", ") || "–" }), el("td", { text: d.last_seen_ms ? when(d.last_seen_ms) : "–" }),

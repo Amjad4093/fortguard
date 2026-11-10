@@ -155,6 +155,12 @@ public final class FortGuard {
         return ["user_id": user, "customer_name": cleanName(name)]
     }
 
+    /// Whether the customer agrees to share their approximate location. Coordinates are sent only with consent,
+    /// and only when the system has granted location permission. Call from the main thread.
+    public func setLocationConsent(_ on: Bool) { env?.setLocationConsent(on) }
+
+    public var isLocationConsent: Bool { UserDefaults.standard.bool(forKey: EnvironmentChecks.locationConsentKey) }
+
     public func setDebugOverride(_ key: String, _ on: Bool) {
         lock.lock(); overrides[key] = on; lock.unlock()
     }

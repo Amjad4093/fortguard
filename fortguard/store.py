@@ -1,6 +1,7 @@
 """In-memory session store. One process, no persistence: a stand-in for the sharded store in the PRD."""
 
 import threading
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -11,7 +12,7 @@ ANY_FLAGS = (
     "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software", "vpn",
     "mock_location",
 )
-LATEST_FLAGS = ("active_call", "screen_sharing")
+LATEST_FLAGS = ("active_call", "cellular_call", "screen_sharing")
 
 
 class ReplayDetected(Exception):
@@ -41,6 +42,10 @@ class Session:
     extra: dict = field(default_factory=dict)  # name -> samples, for sensors not used in scoring
     fstate: object = None  # incremental feature state (incremental.FeatureState)
     owner_proved: bool = False  # a batch in this session carried a valid owner proof
+    ip: str = None  # client address of the latest batch, from the socket or the trusted proxy
+    ip_changes: int = 0  # times the address changed within the session (mobile handovers do this too)
+    location: dict = None  # latest approximate location the app sent, with the time of its fix
+    location_jump: bool = False  # sticky: the phone was somewhere physically impossible within this session
 
     def event_count(self):
         return (len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
@@ -70,7 +75,7 @@ class SessionStore:
                 return None
             return session
 
-    def ingest(self, p, integrity=None, owner_proved=False):
+    def ingest(self, p, integrity=None, owner_proved=False, ip=None):
         """Store one validated, signature-checked batch. Returns counts of what was kept."""
         now = self.clock()
         with self._lock:
@@ -90,6 +95,10 @@ class SessionStore:
             session.last_seen = now
             session.integrity = integrity
             self._merge_env(session, p["environment"])
+            if ip is not None:
+                _note_ip(session, ip)
+            if "location" in p["environment"]:
+                _note_location(session, p["environment"]["location"], p["timestamp_ms"])
 
             consent = bool(p.get("consent", {}).get("behavioral", False))
             session.consent_behavioral = consent
@@ -143,3 +152,33 @@ class SessionStore:
         for name in ("charging", "network_type", "locale", "timezone", "device_model") + tuple(schema.ENV_EXTRA_NUMBERS):
             if name in env:
                 session.env[name] = env[name]
+
+
+def _note_ip(session, ip):
+    if session.ip is not None and ip != session.ip:
+        session.ip_changes += 1
+    session.ip = ip
+
+
+def _distance_km(a, b):
+    """Great-circle distance between two (lat, lng) points, in kilometres."""
+    lat1, lng1, lat2, lng2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _note_location(session, loc, batch_ts_ms):
+    """Keeps the latest fix and marks a jump if the phone covered more ground than is physically possible.
+
+    The fix time is the batch time minus how old the fix was, so a stale last-known location is not
+    compared with a fresh one as if both were current.
+    """
+    fix_ts = batch_ts_ms - int(float(loc.get("fix_age_s", 0)) * 1000)
+    here = {"lat": float(loc["lat"]), "lng": float(loc["lng"]), "accuracy_m": loc.get("accuracy_m"), "fix_ts_ms": fix_ts}
+    prev = session.location
+    if prev is not None and fix_ts > prev["fix_ts_ms"]:
+        km = _distance_km((prev["lat"], prev["lng"]), (here["lat"], here["lng"]))
+        hours = (fix_ts - prev["fix_ts_ms"]) / 3_600_000
+        if km >= config.LOCATION_JUMP_MIN_KM and km / max(hours, 1e-9) > config.LOCATION_MAX_KMH:
+            session.location_jump = True
+    session.location = here

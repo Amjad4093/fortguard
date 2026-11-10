@@ -549,6 +549,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
                 "enrolled_at_ms": int(d.enrolled_at * 1000),
                 "model": env.get("device_model"), "os": env.get("os"), "os_version": env.get("os_version"),
                 "owner_enrolled": bool(d.owner_key_sha256), "last_seen_ms": rec.get("time_ms"),
+                "last_ip": (rec.get("network") or {}).get("ip"),
                 "customers": sorted(users.get(d.device_guid, ()))[:5],
             })
         rows.sort(key=lambda r: -r["enrolled_at_ms"])

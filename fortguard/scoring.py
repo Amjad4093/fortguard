@@ -90,11 +90,14 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
         reasons.append("REASON_DEVICE_INTEGRITY_WEAK")
     if env.get("mock_location"):
         reasons.append("REASON_LOCATION_SPOOFING_SUSPECTED")
+    if session.location_jump:
+        reasons.append("REASON_LOCATION_JUMP_DETECTED")
     if env.get("vpn"):
         reasons.append("REASON_VPN_OR_PROXY")
     if sensitive and env.get("screen_sharing"):
         reasons.append("REASON_SCREEN_SHARING_ACTIVE")
-    if sensitive and env.get("active_call"):
+    in_call = bool(env.get("active_call") or env.get("cellular_call"))
+    if sensitive and in_call:
         reasons.append("REASON_ACTIVE_CALL_DURING_PAYMENT")
     new_payee = bool(tx.get("is_new_beneficiary")) and sensitive
     if new_payee:
@@ -116,7 +119,7 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
 
     if (
         sensitive
-        and env.get("active_call")
+        and in_call
         and (new_payee or "REASON_COGNITIVE_HESITATION_DETECTED" in reasons)
     ):
         reasons.append("REASON_COACHED_SCAM_PATTERN")

@@ -22,6 +22,8 @@ targets:
         CFBundleShortVersionString: "0.1"
         CFBundleVersion: "1"
         UILaunchScreen: {}
+        # Shown by iOS when the app asks for location. Used only when the customer turns sharing on.
+        NSLocationWhenInUseUsageDescription: "Shares your approximate location with your bank only if you turn it on, so a phone that moves impossibly fast can be detected."
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # DEMO ONLY: plain HTTP to a test server. A production app uses HTTPS with pinning.
         NSAppTransportSecurity:

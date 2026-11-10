@@ -1,17 +1,26 @@
 package com.fortguard.sdk
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.StatFs
 import android.hardware.display.DisplayManager
+import android.location.Location
+import android.location.LocationManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.provider.Settings
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import android.view.WindowManager
 import java.io.File
 import java.util.Locale
@@ -35,18 +44,40 @@ internal class EnvironmentChecks(context: Context) {
     private val emulator: Boolean by lazy { checkEmulator() }
     private val hooking: Boolean by lazy { checkHooking() }
 
-    fun snapshot(): Map<String, Any?> = linkedMapOf(
-        "os" to "Android",
-        "os_version" to osVersion(),
-        "is_rooted" to rooted,
-        "is_emulator" to emulator,
-        "has_hooking_framework" to hooking,
-        "active_remote_software" to remoteAccessServiceEnabled(),
-        "screen_sharing" to screenSharing(),
-        "active_call" to inCall(),
-        "vpn" to vpnActive(),
-        "mock_location" to false, // needs location access; not collected in this version
-    ) + deviceFacts()
+    // Live signals, kept current by callbacks so a decision reads the state at the moment it is made.
+    @Volatile private var cellularCall = false
+    @Volatile private var liveNetwork = "none"
+    @Volatile private var networkChanges = 0
+    private var lastNetwork: String? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var phoneListener: Any? = null
+    private val prefs = app.getSharedPreferences("fortguard", Context.MODE_PRIVATE) // same file as FortGuard
+
+    init {
+        startNetworkWatch()
+        startCallWatch()
+    }
+
+    fun snapshot(): Map<String, Any?> {
+        startCallWatch() // READ_PHONE_STATE may have been granted since the last batch
+        val fix = lastFix()
+        val out = linkedMapOf<String, Any?>(
+            "os" to "Android",
+            "os_version" to osVersion(),
+            "is_rooted" to rooted,
+            "is_emulator" to emulator,
+            "has_hooking_framework" to hooking,
+            "active_remote_software" to remoteAccessServiceEnabled(),
+            "screen_sharing" to screenSharing(),
+            "active_call" to (cellularCall || inCall()),
+            "cellular_call" to cellularCall,
+            "vpn" to vpnActive(),
+            "mock_location" to (fix?.isFromMockProvider ?: false),
+        )
+        out.putAll(deviceFacts())
+        sharedLocation(fix)?.let { out["location"] = it }
+        return out
+    }
 
     /**
      * Device facts that need no permission: battery, network type, locale, time zone, screen,
@@ -67,7 +98,8 @@ internal class EnvironmentChecks(context: Context) {
             val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
             out["charging"] = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
         }
-        runCatching { out["network_type"] = networkType() }
+        out["network_type"] = liveNetwork
+        out["network_changes"] = networkChanges
         runCatching {
             val locale = Locale.getDefault()
             out["locale"] = if (locale.country.isEmpty()) locale.language else "${locale.language}-${locale.country}"
@@ -103,6 +135,99 @@ internal class EnvironmentChecks(context: Context) {
             else -> "other"
         }
     }
+
+    /**
+     * Follows the default network as it changes. "cellular" means mobile data is carrying the traffic;
+     * each switch between wifi and mobile data is counted for the session.
+     */
+    private fun startNetworkWatch() {
+        if (networkCallback != null) return
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = noteNetwork()
+            override fun onLost(network: Network) = noteNetwork()
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb) }.onSuccess { networkCallback = cb }
+        noteNetwork()
+    }
+
+    private fun noteNetwork() {
+        val now = runCatching { networkType() }.getOrDefault("none")
+        lastNetwork?.let { if (it != now) networkChanges++ }
+        lastNetwork = now
+        liveNetwork = now
+    }
+
+    /**
+     * Live cellular-call detection: the phone's own call state, from the telephony service. Needs
+     * READ_PHONE_STATE, which the customer grants in the app. Without it, only VoIP calls are seen (audio mode).
+     */
+    private fun startCallWatch() {
+        if (phoneListener != null) return
+        if (app.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return
+        val tm = app.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) registerCallCallback(tm) else registerLegacyCallListener(tm)
+        }
+    }
+
+    @SuppressLint("NewApi")
+    private fun registerCallCallback(tm: TelephonyManager) {
+        val cb = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+            override fun onCallStateChanged(state: Int) {
+                cellularCall = state != TelephonyManager.CALL_STATE_IDLE
+            }
+        }
+        tm.registerTelephonyCallback(app.mainExecutor, cb)
+        phoneListener = cb
+    }
+
+    @Suppress("DEPRECATION")
+    private fun registerLegacyCallListener(tm: TelephonyManager) {
+        val listener = object : PhoneStateListener() {
+            @Deprecated("Replaced by TelephonyCallback on Android 12 and later")
+            override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                cellularCall = state != TelephonyManager.CALL_STATE_IDLE
+            }
+        }
+        tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+        phoneListener = listener
+    }
+
+    // --- Approximate location ---------------------------------------------------------------------------
+
+    private fun hasLocationPermission(): Boolean =
+        app.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * The most recent fix any provider holds, read without starting location updates. Returns null without
+     * the location permission, or when no fix exists. The fix is read for the mock-location check either way;
+     * its coordinates are sent only with the customer's consent.
+     */
+    @SuppressLint("MissingPermission")
+    private fun lastFix(): Location? {
+        if (!hasLocationPermission()) return null
+        val lm = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return runCatching {
+            lm.getProviders(true).mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
+        }.getOrNull()
+    }
+
+    /** Coordinates rounded to about 1 km, and only when the customer agreed and the fix is under 30 minutes old. */
+    private fun sharedLocation(fix: Location?): Map<String, Any?>? {
+        if (fix == null || !prefs.getBoolean("location_consent", false)) return null
+        val ageS = ((System.currentTimeMillis() - fix.time) / 1000L).coerceAtLeast(0L)
+        if (ageS > 1800) return null
+        return linkedMapOf(
+            "lat" to round2(fix.latitude),
+            "lng" to round2(fix.longitude),
+            "accuracy_m" to fix.accuracy.toInt().coerceIn(0, 100000),
+            "fix_age_s" to ageS.toInt(),
+        )
+    }
+
+    private fun round2(v: Double): Double = Math.round(v * 100.0) / 100.0
 
     // --- Screen recording (Android 15+) and mirroring -----------------------------------------
 

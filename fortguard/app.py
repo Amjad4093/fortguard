@@ -24,6 +24,7 @@ from .attestation import (
     DEV_AUTHORITY, AttestationError, AttestationNotConfigured, SimulatedVerifier,
 )
 from . import admin, backoffice, hardening
+from .hardening import client_ip
 from .baseline import Baselines
 from .devices import ACTIVE, DeviceRegistry
 from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_feedback, validate_telemetry
@@ -89,6 +90,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
     The first portal user is "admin" with admin_password, else FORTGUARD_ADMIN_PASSWORD, else a
     fixed development password in dev mode, else a random one printed at start.
     """
+    trust_proxy = os.environ.get("FORTGUARD_TRUST_PROXY") == "1"
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_BODY_BYTES
     api_key = api_key or os.environ.get("FORTGUARD_API_KEY") or DEV_API_KEY
@@ -227,7 +229,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         if skew > config.MAX_SKEW_MS:
             return _error(400, "stale_timestamp", "timestamp_ms is too far from server time")
         try:
-            kept = store.ingest(payload, integrity=device.integrity, owner_proved=owner_proved)
+            kept = store.ingest(payload, integrity=device.integrity, owner_proved=owner_proved,
+                                ip=client_ip(trust_proxy))
         except ReplayDetected:
             return _error(409, "replay_detected", "this nonce was already used for the session")
         except DeviceMismatch:

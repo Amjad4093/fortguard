@@ -52,6 +52,7 @@ enum DemoBackend {
         "REASON_REMOTE_ACCESS_TOOL_ACTIVE": "A remote-access tool is active.",
         "REASON_SCREEN_SHARING_ACTIVE": "The screen is being shared or recorded.",
         "REASON_LOCATION_SPOOFING_SUSPECTED": "Mock location is switched on.",
+        "REASON_LOCATION_JUMP_DETECTED": "The phone was in two places too far apart, too fast.",
         "REASON_VPN_OR_PROXY": "A VPN or proxy is active.",
         "REASON_ACTIVE_CALL_DURING_PAYMENT": "A call is active during the payment.",
         "REASON_PASTE_ACTIVITY_IN_BENEFICIARY_FIELD": "The beneficiary account was pasted.",

@@ -8,6 +8,7 @@ struct ContentView: View {
     @AppStorage("fgApiKey") private var apiKey = "dev-only-api-key"
     @AppStorage("fgUser") private var userId = "usr_" + String(UUID().uuidString.prefix(8)).lowercased()
     @AppStorage("fgName") private var customerName = "Demo Customer"
+    @State private var shareLocation = FortGuard.shared.isLocationConsent
     @State private var level = "STRONG"
     @State private var consent = true
     @State private var forced: Set<String> = []
@@ -36,6 +37,8 @@ struct ContentView: View {
                     TextField("Your full name", text: $customerName)
                         .onChange(of: customerName) { FortGuard.shared.identify(userId: userId, customerName: $0) }
                         .onAppear { FortGuard.shared.identify(userId: userId, customerName: customerName) }
+                    Toggle("Share my approximate location (rounded to about 1 km)", isOn: $shareLocation)
+                        .onChange(of: shareLocation) { FortGuard.shared.setLocationConsent($0) }
                     TextField("Server address", text: $server)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("API key (plays the bank's server)", text: $apiKey)

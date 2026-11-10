@@ -33,6 +33,7 @@ WEIGHTS = {
     "REASON_REMOTE_ACCESS_TOOL_ACTIVE": 450,
     "REASON_SCREEN_SHARING_ACTIVE": 300,
     "REASON_LOCATION_SPOOFING_SUSPECTED": 300,
+    "REASON_LOCATION_JUMP_DETECTED": 300,
     "REASON_VPN_OR_PROXY": 50,
     "REASON_ACTIVE_CALL_DURING_PAYMENT": 200,
     "REASON_PASTE_ACTIVITY_IN_BENEFICIARY_FIELD": 250,
@@ -84,6 +85,9 @@ BASE_SENSORS = ("accelerometer", "gyroscope")
 EXTRA_SENSORS = ("magnetometer", "gravity", "linear_acceleration", "rotation_vector", "light", "proximity", "pressure")
 SENSOR_NAMES = BASE_SENSORS + EXTRA_SENSORS
 NETWORK_TYPES = ("wifi", "cellular", "ethernet", "none", "other")
+# Two device locations this far apart, reached this fast, cannot both be real for one phone.
+LOCATION_JUMP_MIN_KM = 50
+LOCATION_MAX_KMH = 900  # faster than a passenger jet on the ground-to-ground leg
 MAX_EVENTS_PER_SESSION = 50_000
 MAX_IDEMPOTENCY_ENTRIES = 100_000
 

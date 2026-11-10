@@ -70,6 +70,18 @@ def _typing(session):
     return int(inserted), int(deleted), int(round(active_ms))
 
 
+def _network_of(session):
+    """Network facts for the decision: client address, its changes, and the shared location rounded to about 1 km."""
+    loc = getattr(session, "location", None)
+    return {
+        "ip": getattr(session, "ip", None),
+        "ip_changes": getattr(session, "ip_changes", 0),
+        "location": ({"lat": round(loc["lat"], 2), "lng": round(loc["lng"], 2),
+                      "accuracy_m": loc.get("accuracy_m")} if loc else None),
+        "location_jump": bool(getattr(session, "location_jump", False)),
+    }
+
+
 class DecisionLog:
     """Bounded in-memory log of evaluate results, for the portal. Not an audit log."""
 
@@ -109,6 +121,7 @@ class DecisionLog:
             "typing": dict(zip(("typed_chars", "corrected_chars", "active_ms"), _typing(session))),
             "touch_grid": touch_grid(session),
             "environment": {k: env[k] for k in ENV_SHOWN if k in env},
+            "network": _network_of(session),
         }
         with self._lock:
             self._items.appendleft(entry)

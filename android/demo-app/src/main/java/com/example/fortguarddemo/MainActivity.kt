@@ -44,6 +44,8 @@ class MainActivity : Activity() {
         const val DEMO_USER = "demo"
         const val DEMO_PASSWORD = "FortGuard@2026"
         const val DEMO_NAME = "Demo Customer"
+        const val REQ_PHONE = 2
+        const val REQ_LOCATION = 3
         const val DEMO_BALANCE = "PKR 245,300.00"
         const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
 
@@ -74,6 +76,7 @@ class MainActivity : Activity() {
 
     private var loginView: View? = null
     private lateinit var loginName: EditText
+    private lateinit var callStatusView: TextView
     private lateinit var loginUser: EditText
     private lateinit var loginPassword: EditText
     private lateinit var loginError: TextView
@@ -461,6 +464,28 @@ class MainActivity : Activity() {
         owner.addView(text("A notification shows while this is on. Touch and typing are still captured only inside the app.", 12f, MUTED).apply { setPadding(0, dp(4), 0, 0) })
         col.addView(owner, lp(bottom = 12))
 
+        val signals = card()
+        signals.addView(text("Calls and location", 15f, INK, bold = true))
+        signals.addView(text("FortGuard checks whether a phone call is in progress, and whether mobile data or Wi-Fi carries your traffic. Your approximate location is shared only when you turn it on, and it is rounded to about 1 km.", 12f, MUTED))
+        callStatusView = text(callLine(), 13f, INK).apply { setPadding(0, dp(8), 0, 0) }
+        signals.addView(callStatusView)
+        signals.addView(primaryButton("Allow call detection") {
+            requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE), REQ_PHONE)
+        }, lp(top = 10))
+        signals.addView(CheckBox(this).apply {
+            text = "Share my approximate location"
+            isChecked = FortGuard.isLocationConsent(this@MainActivity)
+            setTextColor(INK)
+            setOnCheckedChangeListener { _, on ->
+                FortGuard.setLocationConsent(this@MainActivity, on)
+                if (on && !locationGranted()) {
+                    requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
+                }
+                callStatusView.text = callLine()
+            }
+        }, lp(top = 12))
+        col.addView(signals, lp(bottom = 12))
+
         val forced = card()
         forced.addView(text("Conditions (testing)", 15f, INK, bold = true))
         forced.addView(text("Auto lets the SDK decide from the phone. On or Off forces the server to see that value, to test its rules.", 12f, MUTED))
@@ -685,6 +710,20 @@ class MainActivity : Activity() {
     private fun tint(c: Int): Int = Color.argb(28, Color.red(c), Color.green(c), Color.blue(c))
 
     private fun pct(v: Double) = "${Math.round(v * 100)}%"
+
+    private fun locationGranted(): Boolean =
+        checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun callLine(): String {
+        val phone = checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return "Call detection: " + (if (phone) "on" else "off, VoIP calls only") +
+            " · Location: " + (if (FortGuard.isLocationConsent(this)) "shared" else "not shared")
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (::callStatusView.isInitialized) callStatusView.text = callLine()
+    }
 
     private fun userId(): String =
         prefs.getString("user", null) ?: ("usr_" + java.util.UUID.randomUUID().toString().replace("-", "").take(10))

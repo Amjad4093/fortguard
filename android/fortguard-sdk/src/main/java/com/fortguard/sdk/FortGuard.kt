@@ -207,6 +207,18 @@ object FortGuard {
         identityFields = mapOf("user_id" to userId, "customer_name" to name)
     }
 
+    /**
+     * Whether the customer agrees to share their approximate location. Coordinates are sent only when this is on
+     * and the app has the location permission. Turning it off stops sharing from the next batch.
+     */
+    fun setLocationConsent(context: Context, granted: Boolean) {
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("location_consent", granted).apply()
+    }
+
+    fun isLocationConsent(context: Context): Boolean =
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("location_consent", false)
+
     private fun storedIdentity(prefs: android.content.SharedPreferences): Map<String, String> {
         val userId = prefs.getString("identity_user", null) ?: return emptyMap()
         val name = prefs.getString("identity_name", null)?.let { cleanName(it) } ?: return emptyMap()
