@@ -18,8 +18,10 @@
   },
   "key_events": [
     {
+      "deleted": 0,
       "event_type": "DOWN",
       "field": "beneficiary_account",
+      "inserted": 1,
       "ts": 1799999915801
     },
     {
@@ -28,8 +30,10 @@
       "ts": 1799999915899
     },
     {
+      "deleted": 0,
       "event_type": "DOWN",
       "field": "beneficiary_account",
+      "inserted": 1,
       "ts": 1799999916111
     },
     {
@@ -38,8 +42,10 @@
       "ts": 1799999916174
     },
     {
+      "deleted": 0,
       "event_type": "DOWN",
       "field": "beneficiary_account",
+      "inserted": 1,
       "ts": 1799999916289
     },
     {
@@ -93,7 +99,7 @@
   },
   "seq": 0,
   "session_id": "sess_jwnjlqxq9o98",
-  "signature": "MEQCIE0g0ZtqyWyI7dQ3yJkiJ8hyYZ99tvj9IxEj7s1e8TOcAiAQMExPXl_K5p28TRGBSGGQygiSjZM6eDibPLiSgdS6CQ",
+  "signature": "MEUCIGgLZ0ZqDPzP05aeSLcjBI-N_guWCp70uX9pnsGFmnJxAiEAv5a6qDJMaFyR-_nO5YAAQfLimAbOuizjKko1FK443aU",
   "timestamp_ms": 1799999940000,
   "touch_events": [
     {
