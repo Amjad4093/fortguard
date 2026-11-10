@@ -181,3 +181,62 @@ def test_decision_keeps_the_measured_numbers_and_no_text(api, make_session):
     assert feats, "the behaviour measured for the decision is stored with it"
     assert all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in feats.values())
     assert "ft_accel_samples" in feats  # always measured; typing values appear only when the phone sends counts
+
+
+# --- What each decision keeps for the portal's signal panels (numbers only) ----------------------------
+
+
+def _decision_for(api, make_session, scenario):
+    session = make_session(scenario)
+    run_session(api, session)
+    _, data = get(api, "/v1/admin/decisions", auth=True)
+    return data["decisions"][0]
+
+
+def test_decision_records_every_signal_with_counts(api, make_session):
+    from fortguard import config
+
+    d = _decision_for(api, make_session, "genuine")
+    assert set(d["captured"]) == {"touch", "keys", "ui", "accelerometer", "gyroscope"} | set(config.EXTRA_SENSORS)
+    assert d["captured"]["touch"] > 0 and d["captured"]["accelerometer"] > 0
+    assert all(isinstance(n, int) and n >= 0 for n in d["captured"].values())
+
+
+def test_touch_grid_accounts_for_every_touch_point(api, make_session):
+    d = _decision_for(api, make_session, "genuine")
+    grid = d["touch_grid"]
+    assert grid and len(grid) == admin.GRID_ROWS and all(len(row) == admin.GRID_COLS for row in grid)
+    assert sum(sum(row) for row in grid) > 0
+
+
+def test_typing_totals_are_counts_not_text(api, make_session):
+    d = _decision_for(api, make_session, "coached_scam")
+    assert set(d["typing"]) == {"typed_chars", "corrected_chars", "active_ms"}
+    assert d["typing"]["typed_chars"] >= 0 and d["typing"]["active_ms"] >= 0
+    dumped = json.dumps(d)
+    assert "text" not in d and "value" not in d and "beneficiary_account\"" not in dumped
+
+
+def test_environment_keeps_device_facts_but_not_locale_or_timezone(api, make_session):
+    d = _decision_for(api, make_session, "genuine")
+    assert "locale" not in d["environment"] and "timezone" not in d["environment"]
+    assert set(d["environment"]) <= set(admin.ENV_SHOWN)
+
+
+def test_degraded_decision_still_has_the_new_fields(api, make_session):
+    from fortguard.app import _NoSession
+
+    entry = admin.DecisionLog().record(
+        {"session_id": "s", "user_id": "u", "event_type": "LOGIN", "transaction_details": {}},
+        _NoSession("u"), {"risk_score": 0, "risk_level": "ALLOW", "action_recommended": "ALLOW",
+                          "reason_codes": [], "score_breakdown": [], "threat_details": {},
+                          "signals_used": 0, "model_version": "x"}, 0)
+    assert all(n == 0 for n in entry["captured"].values())
+    assert entry["touch_grid"] is None and entry["typing"]["typed_chars"] == 0
+
+
+def test_simulated_typing_reports_characters_and_corrections(api, make_session):
+    d = _decision_for(api, make_session, "genuine")
+    assert d["typing"]["typed_chars"] > 0
+    assert 0 < d["typing"]["corrected_chars"] < d["typing"]["typed_chars"]
+    assert d["typing"]["active_ms"] > 0

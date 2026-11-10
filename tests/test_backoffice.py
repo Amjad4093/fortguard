@@ -366,3 +366,32 @@ def test_purge_and_erase_need_admin(api, admin, bo_app, make_session):
     analyst = make_user(admin, bo_app, "sara", "analyst")
     assert analyst.call("post", "/v1/bo/maintenance/purge")[0] == 403
     assert analyst.call("post", "/v1/bo/customers/usr_x/erase")[0] == 403
+
+
+def test_overview_reports_signal_coverage_and_typing_speed(api, admin, make_session):
+    from fortguard import admin as admin_mod
+    from fortguard.backoffice import CPM_LABELS
+
+    for scenario in ("genuine", "coached_scam", "bot_scripted"):
+        run_session(api, make_session(scenario))
+    status, o = admin.call("get", "/v1/bo/overview")
+    assert status == 200
+    coverage = {row["signal"]: row for row in o["coverage"]}
+    assert set(coverage) == set(admin_mod.SIGNAL_KEYS)
+    assert coverage["touch"]["decisions"] == 3 and coverage["touch"]["share"] == 1.0
+    assert all(0 <= row["share"] <= 1 for row in o["coverage"])
+    assert [row["label"] for row in o["typing_speed"]] == list(CPM_LABELS)
+    assert sum(row["decisions"] for row in o["typing_speed"]) <= 3
+
+
+def test_typing_speed_buckets_cover_the_range():
+    from fortguard.backoffice import _cpm_bucket, CPM_LABELS
+
+    assert _cpm_bucket(0) == CPM_LABELS[0] and _cpm_bucket(99.9) == CPM_LABELS[0]
+    assert _cpm_bucket(100) == CPM_LABELS[1] and _cpm_bucket(399) == CPM_LABELS[3]
+    assert _cpm_bucket(400) == CPM_LABELS[4] and _cpm_bucket(5000) == CPM_LABELS[4]
+
+
+def test_empty_overview_has_no_coverage_rows(admin):
+    status, o = admin.call("get", "/v1/bo/overview")
+    assert status == 200 and o["coverage"] == [] and o["last_24h"]["total"] == 0

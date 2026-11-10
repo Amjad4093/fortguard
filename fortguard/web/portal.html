@@ -183,6 +183,21 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+/* signal panels */
+.hint { font-size: .8rem; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+.sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.sig { border: 1px solid var(--rule); border-radius: 10px; padding: 11px 13px; display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.sig.off { opacity: .6; }
+.sig .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--faint); }
+.sig.on .dot { background: var(--allow); }
+.sig b { display: block; font-size: .875rem; font-weight: 600; overflow-wrap: anywhere; }
+.sig small { display: block; color: var(--muted); font-size: .78rem; margin-top: 2px; }
+.stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat div { border: 1px solid var(--rule); border-radius: 10px; padding: 11px 13px; min-width: 0; }
+.stat b { display: block; font: 500 1.4rem/1.15 var(--serif); font-variant-numeric: tabular-nums; }
+.stat span { display: block; font-size: .78rem; color: var(--muted); margin-top: 5px; line-height: 1.35; }
+.heat { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; max-width: 280px; margin: 4px 0 14px; }
+.heat i { display: block; aspect-ratio: 1 / 1.5; border-radius: 3px; background: var(--grey-bg); }
 </style>
 </head>
 <body>
@@ -367,6 +382,22 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
       card("Decisions per hour (last 24 h)", o.hourly.length ? [chart, legend] : [el("div", { class: "empty", text: "No decisions yet." + (S.dev ? " Use “Run sample scenarios” or the demo apps." : "") })]),
       card("Most common reasons", reasons)
     ]));
+    if (o.coverage && o.coverage.length) {
+      var cov = o.coverage.map(function (r) {
+        return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: SIGNAL_LABEL[r.signal] || r.signal }),
+          el("div", { class: "bar" }, [el("i", { style: "width:" + Math.round(r.share * 100) + "%" })])]), el("b", { text: Math.round(r.share * 100) + "%" })]);
+      });
+      var typed = o.typing_speed || [];
+      var tmax = Math.max.apply(null, [1].concat(typed.map(function (r) { return r.decisions; })));
+      var typingRows = typed.some(function (r) { return r.decisions > 0; }) ? typed.map(function (r) {
+        return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: r.label + " characters per minute" }),
+          el("div", { class: "bar" }, [el("i", { style: "width:" + (r.decisions / tmax * 100) + "%" })])]), el("b", { text: String(r.decisions) })]);
+      }) : [el("div", { class: "empty", text: "No typing in the last 24 hours." })];
+      v.appendChild(el("div", { class: "two" }, [
+        card("Signal coverage, last 24 h", [el("p", { class: "hint", text: "Share of decisions in which each signal delivered data." })].concat(cov)),
+        card("Typing speed, last 24 h", [el("p", { class: "hint", text: "Characters per minute while typing, across decisions that included typing." })].concat(typingRows))
+      ]));
+    }
   }
   function tile(n, label) { return el("div", { class: "tile" }, [el("b", { text: String(n) }), el("span", { text: label })]); }
   async function simulate(e) {
@@ -404,29 +435,114 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
       el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No cases here. Step-up and block decisions open cases automatically." })]));
   }
 
-  // Behavioural measurements stored with each decision: label, unit (% shown as a percentage) and group.
-  var FEATURE_GROUPS = [
-    ["Typing", [["ft_typing_speed_cpm", "Typing speed", "cpm"], ["ft_correction_rate", "Corrections", "%"],
-      ["ft_keystroke_flight_time_avg", "Gap between keys", "ms"], ["ft_keystroke_hold_time_avg", "Key hold time", "ms"],
-      ["ft_hesitation_index", "Hesitation", "%"], ["ft_pasting_frequency", "Sensitive pastes", ""], ["ft_paste_beneficiary_count", "Beneficiary pastes", ""]]],
-    ["Touch", [["ft_touch_count", "Touches", ""], ["ft_touch_pressure_mean", "Average pressure", ""], ["ft_touch_size_mean", "Contact size", ""],
-      ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_count", "Swipes", ""], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"]]],
-    ["Motion and device", [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""]]]
+  // Signals the decision record keeps as sample counts, in the order analysts read them.
+  var SIGNALS = [
+    ["touch", "Touch screen", "Taps, swipes, pressure and contact size"],
+    ["keys", "Keyboard", "Key timing and character counts only"],
+    ["ui", "Field events", "Pastes and field changes"],
+    ["accelerometer", "Accelerometer", "Movement on three axes"],
+    ["gyroscope", "Gyroscope", "Rotation rate"],
+    ["magnetometer", "Magnetometer", "Compass heading"],
+    ["gravity", "Gravity", "Which way the screen faces"],
+    ["linear_acceleration", "Linear acceleration", "Movement without gravity"],
+    ["rotation_vector", "Rotation vector", "Full device orientation"],
+    ["light", "Light sensor", "Ambient light level"],
+    ["proximity", "Proximity sensor", "Something close to the screen, such as the ear"],
+    ["pressure", "Pressure sensor", "Air pressure"]
   ];
+  var SIGNAL_LABEL = {};
+  SIGNALS.forEach(function (s) { SIGNAL_LABEL[s[0]] = s[1]; });
+  var ENV_FLAGS = [["is_rooted", "Rooted or jailbroken"], ["is_emulator", "Emulator"], ["has_hooking_framework", "Hooking framework"],
+    ["active_remote_software", "Remote-control app running"], ["screen_sharing", "Screen being shared"], ["active_call", "Call in progress"],
+    ["vpn", "VPN on"], ["mock_location", "Mock location on"]];
+
   function formatFeature(v, unit) {
-    if (v == null || typeof v !== "number") return "–";
+    if (v == null || typeof v !== "number") return null;
     var text = unit === "%" ? Math.round(v * 100) + "%" : (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100));
     return unit && unit !== "%" ? text + " " + unit : text;
   }
-  function behaviourCard(f) {
-    var blocks = FEATURE_GROUPS.map(function (g) {
-      var rows = g[1].filter(function (r) { return f[r[0]] !== undefined && f[r[0]] !== null; }).map(function (r) {
-        return el("tr", {}, [el("td", { text: r[1] }), el("td", { class: "num", text: formatFeature(f[r[0]], r[2]) })]);
-      });
-      return rows.length ? el("div", {}, [el("div", { class: "sub", text: g[0] }), el("table", { class: "plain" }, [el("tbody", {}, rows)])]) : null;
-    }).filter(Boolean);
-    return card("What FortGuard measured", blocks.length ? [el("p", { class: "measure-note", text: "Numbers only. Typed characters are never stored." })].concat(blocks)
-      : [el("div", { class: "empty", text: "No behaviour was measured for this session." })]);
+  function kvList(rows) {
+    var shown = rows.filter(function (r) { return r[1] != null && r[1] !== ""; });
+    return shown.length ? el("dl", { class: "kv" }, [].concat.apply([], shown.map(function (r) { return [el("dt", { text: r[0] }), el("dd", { text: String(r[1]) })]; }))) : null;
+  }
+  function featureRows(f, list) {
+    return list.map(function (r) { return [r[1], formatFeature(f[r[0]], r[2])]; });
+  }
+  function noData(title, text) { return card(title, [el("div", { class: "empty", text: text })]); }
+
+  function signalCard(d) {
+    var cap = d.captured;
+    if (!cap) return noData("Signals captured", "Not recorded for this decision.");
+    var on = SIGNALS.filter(function (s) { return cap[s[0]] > 0; }).length;
+    var grid = el("div", { class: "sig-grid" }, SIGNALS.map(function (s) {
+      var n = cap[s[0]] || 0;
+      return el("div", { class: "sig " + (n ? "on" : "off"), title: s[2] }, [el("span", { class: "dot" }), el("div", {}, [
+        el("b", { text: s[1] }), el("small", { text: n ? n.toLocaleString() + " samples" : "No samples" })])]);
+    }));
+    return card("Signals captured", [
+      el("p", { class: "hint", text: on + " of " + SIGNALS.length + " signals delivered data for this decision." }), grid,
+      el("p", { class: "hint", text: "“No samples” means the phone sent nothing for that signal. The phone may not have the sensor, or the app may have been in the background or blocked." })
+    ]);
+  }
+
+  function typingCard(d) {
+    var t = d.typing;
+    if (!t) return noData("Typing", "Not recorded for this decision.");
+    var f = d.features || {};
+    if (!t.typed_chars && !t.corrected_chars && f.ft_typing_speed_cpm == null) return noData("Typing", "No typing in this decision.");
+    var stats = [
+      [t.typed_chars, "Characters typed"],
+      [t.corrected_chars, "Characters corrected"],
+      [f.ft_typing_speed_cpm != null ? Math.round(f.ft_typing_speed_cpm) : "–", "Typing speed, characters per minute"],
+      [f.ft_correction_rate != null ? Math.round(f.ft_correction_rate * 100) + "%" : "–", "Correction rate"]
+    ];
+    var grid = el("div", { class: "stat" }, stats.map(function (s) { return el("div", {}, [el("b", { text: String(s[0]) }), el("span", { text: s[1] })]); }));
+    var rows = [["Time spent typing", t.active_ms ? (t.active_ms < 1000 ? t.active_ms + " ms" : (t.active_ms / 1000).toFixed(1) + " s") : null]]
+      .concat(featureRows(f, [["ft_keystroke_flight_time_avg", "Gap between keys", "ms"], ["ft_keystroke_hold_time_avg", "Key hold time", "ms"],
+        ["ft_hesitation_index", "Hesitation before taps", "%"], ["ft_pasting_frequency", "Pastes into sensitive fields", ""],
+        ["ft_paste_beneficiary_count", "Pastes into the beneficiary field", ""]]));
+    return card("Typing", [grid, kvList(rows) || el("div"), el("p", { class: "hint", text: "Typing speed counts only the time between keys in the same field and ignores pauses over 2 seconds. Corrections are characters deleted. The characters themselves are never stored." })]);
+  }
+
+  function touchCard(d) {
+    var g = d.touch_grid;
+    if (!g) return noData("Touch positions", "No touches in this decision.");
+    var max = Math.max.apply(null, [1].concat([].concat.apply([], g)));
+    var cells = [];
+    g.forEach(function (row) { row.forEach(function (n) {
+      var c = el("i", { title: n + (n === 1 ? " touch" : " touches") });
+      if (n) c.style.background = "color-mix(in srgb, var(--accent) " + Math.max(14, Math.round(n / max * 100)) + "%, var(--grey-bg))";
+      cells.push(c);
+    }); });
+    var f = d.features || {};
+    return card("Touch positions", [el("p", { class: "hint", text: "Where the finger landed across the screen. Darker cells had more touches." }),
+      el("div", { class: "heat", role: "img", "aria-label": "Touch positions across the screen" }, cells),
+      kvList(featureRows(f, [["ft_touch_count", "Touches", ""], ["ft_swipe_count", "Swipes", ""], ["ft_touch_pressure_mean", "Average pressure", ""],
+        ["ft_touch_size_mean", "Contact size", ""], ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"]])) || el("div")]);
+  }
+
+  function deviceCard(d) {
+    var e = d.environment;
+    var f = d.features || {};
+    if (!e && !d.features) return noData("Device and environment", "Not recorded for this decision.");
+    e = e || {};
+    var rows = [
+      ["Operating system", e.os ? e.os + (e.os_version ? " " + e.os_version : "") : null],
+      ["Battery", e.battery_level != null ? e.battery_level + "%" + (e.charging ? ", charging" : "") : null],
+      ["Network", e.network_type],
+      ["Screen", e.screen_width ? e.screen_width + " × " + e.screen_height : null],
+      ["Free storage", e.free_storage_mb != null ? (e.free_storage_mb / 1024).toFixed(1) + " GB" : null],
+      ["App installed for", e.app_install_age_days != null ? e.app_install_age_days + " days" : null]
+    ].concat(ENV_FLAGS.filter(function (fl) { return fl[0] in e; }).map(function (fl) { return [fl[1], e[fl[0]] ? "Yes" : "No"]; }));
+    var motion = featureRows(f, [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""]]);
+    var kids = [kvList(rows) || el("div", { class: "empty", text: "No device facts were sent." })];
+    if (kvList(motion)) kids.push(el("div", { class: "sub", text: "Motion" }), kvList(motion));
+    return card("Device and environment", kids);
+  }
+
+  // The per-case measurement panels: what was captured, typing, touch positions, and the device.
+  function measurementCards(d) {
+    return [signalCard(d), typingCard(d), touchCard(d), deviceCard(d)];
   }
 
   async function caseDetail(v, id) {
@@ -449,7 +565,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
     var left = [card("Why FortGuard flagged it", why), card("Details", [facts])];
-    if (d.features) left.push(behaviourCard(d.features));
+    left = left.concat(measurementCards(d));
     if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
       return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);
     }))])]));

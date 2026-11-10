@@ -45,7 +45,18 @@ from collections import Counter, defaultdict
 from flask import g, jsonify, request
 
 from . import config
+from .admin import SIGNAL_KEYS
 from .schema import ValidationFailure
+
+CPM_LABELS = ("under 100", "100–199", "200–299", "300–399", "400 and over")
+
+
+def _cpm_bucket(cpm):
+    """Typing speed bucket, characters per minute. Shown as a histogram on the dashboard."""
+    for limit, label in ((100, CPM_LABELS[0]), (200, CPM_LABELS[1]), (300, CPM_LABELS[2]), (400, CPM_LABELS[3])):
+        if cpm < limit:
+            return label
+    return CPM_LABELS[4]
 
 ROLES = ("viewer", "analyst", "admin")
 RANK = {r: i for i, r in enumerate(ROLES)}
@@ -344,10 +355,20 @@ def register(app, *, bo, api_key, registry, dev_mode):
         levels = Counter(r["risk_level"] for r in rows)
         reasons = Counter()
         hourly = defaultdict(lambda: {"ALLOW": 0, "STEP_UP": 0, "BLOCK": 0})
+        seen = Counter()  # decisions in which each signal delivered at least one sample
+        cpm_buckets = Counter()
         for r in rows:
-            for code in json.loads(r["record"]).get("reason_codes", []):
+            rec = json.loads(r["record"])
+            for code in rec.get("reason_codes", []):
                 reasons[code] += 1
             hourly[(r["time_ms"] // 3_600_000) * 3_600_000][r["risk_level"]] += 1
+            for name, n in (rec.get("captured") or {}).items():
+                if n:
+                    seen[name] += 1
+            cpm = (rec.get("features") or {}).get("ft_typing_speed_cpm")
+            if cpm is not None:
+                cpm_buckets[_cpm_bucket(cpm)] += 1
+        total = len(rows)
         statuses = Counter(r["status"] for r in bo.q("SELECT status FROM cases"))
         return jsonify({
             "last_24h": {"total": len(rows), "ALLOW": levels["ALLOW"], "STEP_UP": levels["STEP_UP"], "BLOCK": levels["BLOCK"]},
@@ -357,6 +378,9 @@ def register(app, *, bo, api_key, registry, dev_mode):
             "cases": {s: statuses[s] for s in CASE_STATUSES},
             "devices": {"total": len(registry.all()), "revoked": sum(1 for d in registry.all() if d.status != "ACTIVE")},
             "feedback": feedback_summary(bo),
+            "coverage": [{"signal": k, "decisions": seen[k], "share": round(seen[k] / total, 3) if total else 0}
+                         for k in SIGNAL_KEYS] if total else [],
+            "typing_speed": [{"label": label, "decisions": cpm_buckets[label]} for label in CPM_LABELS],
         })
 
     # cases

@@ -23,10 +23,51 @@ from flask import abort, current_app, jsonify, request, send_from_directory
 
 from . import config
 from .attestation import DEV_AUTHORITY, LEVELS
-from .schema import ID_RE, ValidationFailure
+from .features import typing_totals
+from .schema import ENV_BOOLS, ENV_EXTRA_NUMBERS, ID_RE, ValidationFailure
 
 WEB_DIR = pathlib.Path(__file__).parent / "web"
 MAX_DECISIONS = 500
+GRID_COLS, GRID_ROWS = 8, 14  # touch heatmap resolution, stored as counts per cell
+# Device facts the portal may show. Locale, timezone and anything free-form are deliberately left out.
+ENV_SHOWN = tuple(ENV_BOOLS) + ("os", "os_version", "network_type", "charging") + tuple(ENV_EXTRA_NUMBERS)
+# Signal keys recorded in "captured": touch, keys, ui, the two base sensors, and every extra sensor.
+SIGNAL_KEYS = ("touch", "keys", "ui", "accelerometer", "gyroscope") + tuple(config.EXTRA_SENSORS)
+
+
+def captured_counts(session):
+    """How many samples each signal delivered in this session. Numbers only, zero included.
+
+    A degraded decision has no telemetry at all, so every count is zero.
+    """
+    counts = {name: len(getattr(session, attr, None) or [])
+              for name, attr in (("touch", "touch"), ("keys", "keys"), ("ui", "ui"),
+                                 ("accelerometer", "accel"), ("gyroscope", "gyro"))}
+    extra = getattr(session, "extra", None) or {}
+    for name in config.EXTRA_SENSORS:
+        counts[name] = len(extra.get(name) or [])
+    return counts
+
+
+def touch_grid(session):
+    """Touch positions binned onto a coarse grid, normalised to the screen when it is known."""
+    points = [(e["x"], e["y"]) for e in (getattr(session, "touch", None) or []) if "x" in e and "y" in e]
+    if not points:
+        return None
+    env = getattr(session, "env", None) or {}
+    width = env.get("screen_width") or max(x for x, _ in points) or 1
+    height = env.get("screen_height") or max(y for _, y in points) or 1
+    grid = [[0] * GRID_COLS for _ in range(GRID_ROWS)]
+    for x, y in points:
+        col = min(GRID_COLS - 1, max(0, int(x / width * GRID_COLS)))
+        row = min(GRID_ROWS - 1, max(0, int(y / height * GRID_ROWS)))
+        grid[row][col] += 1
+    return grid
+
+
+def _typing(session):
+    inserted, deleted, active_ms = typing_totals(getattr(session, "keys", None) or [])
+    return int(inserted), int(deleted), int(round(active_ms))
 
 
 class DecisionLog:
@@ -38,6 +79,7 @@ class DecisionLog:
 
     def record(self, body, session, result, now_s, features=None):
         tx = body.get("transaction_details") or {}
+        env = getattr(session, "env", None) or {}
         account = tx.get("beneficiary_account")
         entry = {
             "time_ms": int(now_s * 1000),
@@ -63,6 +105,10 @@ class DecisionLog:
             # Numbers only: the behavioural measurements behind this decision, for the back office.
             "features": {k: round(float(v), 4) for k, v in (features or {}).items()
                          if isinstance(v, (int, float)) and not isinstance(v, bool)},
+            "captured": captured_counts(session),
+            "typing": dict(zip(("typed_chars", "corrected_chars", "active_ms"), _typing(session))),
+            "touch_grid": touch_grid(session),
+            "environment": {k: env[k] for k in ENV_SHOWN if k in env},
         }
         with self._lock:
             self._items.appendleft(entry)

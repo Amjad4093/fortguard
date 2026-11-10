@@ -75,10 +75,13 @@ def _swipes(rng, t, count, human):
 
 def _typing(rng, t, count, field, human):
     events = []
-    for _ in range(count):
+    for i in range(count):
         hold = max(30, rng.gauss(90, 20)) if human else 1
         flight = max(40, rng.gauss(190, 60)) if human else 2
-        events.append({"event_type": "DOWN", "ts": int(t), "field": field})
+        # Character counts, as the SDK sends them: a typed character, or a correction (backspace) now and then.
+        correction = human and i % 9 == 8
+        events.append({"event_type": "DOWN", "ts": int(t), "field": field,
+                       "inserted": 0 if correction else 1, "deleted": 1 if correction else 0})
         events.append({"event_type": "UP", "ts": int(t + hold), "field": field})
         t += hold + flight
     return events, t
