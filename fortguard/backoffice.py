@@ -611,6 +611,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
                     "model": env.get("device_model"), "os": env.get("os"), "os_version": env.get("os_version"),
                     "integrity_level": rec.get("device_integrity"),
                     "status": dev.status if dev else "UNKNOWN",
+                    "owner_enrolled": bool(dev and dev.owner_key_sha256),
                     "last_seen_ms": rec.get("time_ms"), "first_seen_ms": rec.get("time_ms"),
                 }
             else:

@@ -17,7 +17,7 @@ CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 
 TOP_ALLOWED = {
     "session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "seq", "consent",
-    "environment", "touch_events", "key_events", "ui_events", "sensor_data", "signature",
+    "environment", "touch_events", "key_events", "ui_events", "sensor_data", "signature", "owner_proof",
 }
 TOP_REQUIRED = ("session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "environment")
 
@@ -115,6 +115,11 @@ def validate_telemetry(p):
     if "behavioral" in consent and not isinstance(consent["behavioral"], bool):
         _fail("invalid_request", "consent.behavioral must be true or false")
 
+    if "owner_proof" in p:  # optional: a batch recorded during an owner enrolment window
+        proof = p["owner_proof"]
+        if not isinstance(proof, dict) or set(proof) != {"public_key", "signature"} or not all(
+                isinstance(proof[k], str) and 1 <= len(proof[k]) <= 1024 for k in proof):
+            _fail("invalid_request", "owner_proof must hold public_key and signature text")
     env = p["environment"]
     if not isinstance(env, dict):
         _fail("invalid_request", "environment must be an object")

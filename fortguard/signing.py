@@ -16,6 +16,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+OWNER_CONTEXT = b"fortguard.owner-proof.v1\n"  # the owner's key signs only this, never telemetry directly
 TELEMETRY_CONTEXT = b"fortguard.telemetry.v1\n"  # domain separation: a telemetry signature is never valid elsewhere
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 
@@ -82,3 +83,24 @@ def verify_payload(payload, public_key) -> bool:
         return True
     except (InvalidSignature, ValueError, TypeError):
         return False
+
+
+def owner_signed_bytes(payload):
+    """What the owner key signs: the batch without its own signatures. Device and owner signatures are
+    separate, so an owner proof cannot be reused on another batch."""
+    body = {k: v for k, v in payload.items() if k not in ("signature", "owner_proof")}
+    return OWNER_CONTEXT + json.dumps(
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def verify_owner_proof(payload):
+    """Return (public key, fingerprint) when the batch carries a valid owner proof, otherwise None."""
+    proof = payload.get("owner_proof")
+    if not isinstance(proof, dict):
+        return None
+    try:
+        key = load_public_key(proof["public_key"])
+        key.verify(b64d(proof["signature"]), owner_signed_bytes(payload), _VERIFY)
+    except (InvalidSignature, ValueError, TypeError, KeyError):
+        return None
+    return key

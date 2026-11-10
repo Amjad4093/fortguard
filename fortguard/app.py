@@ -28,7 +28,7 @@ from .baseline import Baselines
 from .devices import ACTIVE, DeviceRegistry
 from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_feedback, validate_telemetry
 from .scoring import degraded_decision, score_session
-from .signing import key_sha256, load_public_key, verify_payload
+from .signing import key_sha256, load_public_key, verify_owner_proof, verify_payload
 from .store import DeviceMismatch, ReplayDetected, SessionStore
 
 DEV_API_KEY = "dev-only-api-key"
@@ -203,11 +203,22 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
             return _error(403, "app_mismatch", "app_id does not match the enrolled app")
         if not verify_payload(payload, device.key):
             return _error(401, "bad_signature", "signature is missing or does not match the payload")
+        owner_proved = False
+        if "owner_proof" in payload:
+            owner_key = verify_owner_proof(payload)
+            if owner_key is None:
+                return _error(401, "bad_owner_proof", "owner proof does not verify")
+            fingerprint = key_sha256(owner_key)
+            if device.owner_key_sha256 is None:
+                registry.set_owner_key(device.device_guid, fingerprint)  # first owner key on this device
+            elif device.owner_key_sha256 != fingerprint:
+                return _error(403, "owner_key_mismatch", "a different owner key is enrolled on this device")
+            owner_proved = True
         skew = abs(clock() * 1000 - payload["timestamp_ms"])
         if skew > config.MAX_SKEW_MS:
             return _error(400, "stale_timestamp", "timestamp_ms is too far from server time")
         try:
-            kept = store.ingest(payload, integrity=device.integrity)
+            kept = store.ingest(payload, integrity=device.integrity, owner_proved=owner_proved)
         except ReplayDetected:
             return _error(409, "replay_detected", "this nonce was already used for the session")
         except DeviceMismatch:
@@ -251,7 +262,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
         bo.record_decision(decisions.record(body, session, result, clock(), feats))
         app.fortguard_metrics.decision(result["risk_level"], result.get("degraded"))
-        if feats is not None and result["risk_level"] == "ALLOW":
+        if feats is not None and (result["risk_level"] == "ALLOW" or getattr(session, "owner_proved", False)):
             baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))
 
         if request_id:

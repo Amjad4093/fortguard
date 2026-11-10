@@ -40,6 +40,7 @@ class Session:
     gyro: list = field(default_factory=list)
     extra: dict = field(default_factory=dict)  # name -> samples, for sensors not used in scoring
     fstate: object = None  # incremental feature state (incremental.FeatureState)
+    owner_proved: bool = False  # a batch in this session carried a valid owner proof
 
     def event_count(self):
         return (len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
@@ -69,7 +70,7 @@ class SessionStore:
                 return None
             return session
 
-    def ingest(self, p, integrity=None):
+    def ingest(self, p, integrity=None, owner_proved=False):
         """Store one validated, signature-checked batch. Returns counts of what was kept."""
         now = self.clock()
         with self._lock:
@@ -124,6 +125,8 @@ class SessionStore:
                     session.fstate = FeatureState()
                 session.fstate.update(added["touch"], added["keys"], added["ui"], added["accel"], added["gyro"])
 
+            if owner_proved:
+                session.owner_proved = True
             if is_new:
                 self._sessions[session.session_id] = session
             return kept

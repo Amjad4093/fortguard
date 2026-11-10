@@ -26,6 +26,7 @@ class Device:
     enrolled_at: float
     status: str = ACTIVE
     key_version: int = 1
+    owner_key_sha256: str = None  # set by the first verified owner proof; a device keeps one owner key
 
     @property
     def public_key_b64(self):
@@ -61,6 +62,13 @@ class DeviceRegistry:
     def get(self, device_guid):
         with self._lock:
             return self._devices.get(device_guid)
+
+    def set_owner_key(self, device_guid, fingerprint):
+        with self._lock:
+            device = self._devices.get(device_guid)
+            if device is not None and device.owner_key_sha256 is None:
+                device.owner_key_sha256 = fingerprint
+            return device
 
     def enroll(self, device_guid, app_id, platform, key, integrity):
         with self._lock:
