@@ -105,6 +105,14 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(shell)
+        // Android 15 draws the app edge to edge. Keep the screens clear of the status bar and the navigation bar.
+        shell.setOnApplyWindowInsetsListener { view, insets ->
+            @Suppress("DEPRECATION")
+            view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
+                insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            insets
+        }
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(BG))
         showSplash()
         startSdk()
         waitForEnrollment(0)
@@ -118,6 +126,12 @@ class MainActivity : Activity() {
     override fun onPause() {
         FortGuard.detach(this)
         super.onPause()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        // Back returns to Home first, and only leaves the app from Home.
+        if (loggedIn && currentTab != "home") selectTab("home") else super.onBackPressed()
     }
 
     override fun onDestroy() {
