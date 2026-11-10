@@ -25,28 +25,23 @@ Every time code is pushed, GitHub's own machines (the **Actions** tab of the rep
 
 You do not need Android Studio or Xcode.
 
-## 2. Put the test server online (Render, free)
+## 2. Put the test server online (PythonAnywhere, free, no card)
 
-1. Sign in at https://render.com with **GitHub**.
-2. **New → Blueprint**, pick the `fortguard` repository, then **Apply**. Render reads `render.yaml` and builds
-   the server (about 5 minutes the first time).
-3. Open the new **fortguard-test** service. Its address looks like `https://fortguard-test-xxxx.onrender.com`.
-4. Under **Environment** you will find two generated values:
-   - `FORTGUARD_ADMIN_PASSWORD`: the back-office password for user **admin**
-   - `FORTGUARD_API_KEY`: the key the demo apps use in their "API key" field
+Follow **docs/PYTHONANYWHERE.md**: create a free account, add a web app, upload
+`fortguard-pythonanywhere.zip`, paste two commands, press Reload. About 15 minutes. You get
+`https://<username>.pythonanywhere.com` with an admin password and API key that only you can see.
 
-The free plan sleeps after 15 minutes without use; the first request after that takes about a minute.
-It also forgets enrolled devices and cases when it restarts. The demo apps re-enroll on their own.
+(`render.yaml` is kept for Render, which needs a payment card on file even for its free plan.)
 
 ## 3. Test
 
-**Back office:** open `https://<your-render-address>/portal`, sign in as `admin`, then press
+**Back office:** open `https://<username>.pythonanywhere.com/portal`, sign in as `admin`, then press
 **Run sample scenarios** on the Dashboard to fill it with example cases. Add analysts under **Users**.
 
 **Android phone:**
 1. On the phone, open the repository's **Releases** page (signed in to GitHub) and download **FortGuardDemo.apk**.
 2. Open it and allow "install unknown apps" when asked.
-3. In the app, enter the Render address in **Server** (with `https://`), paste the API key, tap **Connect**.
+3. In the app, enter your PythonAnywhere address in **Server** (with `https://`), paste the API key, tap **Connect**.
    The status should show "enrolled".
 4. Make a transfer. Then try one **during a real phone or WhatsApp call**: the SDK detects the call itself.
 5. Watch each decision appear as a case in the back office.
@@ -56,7 +51,7 @@ The cloud build proves the iOS app compiles and runs on a simulated iPhone again
 screenshot is in the **ios-results** artifact. To test on real iPhones later you need an Apple Developer
 membership (US$99/year), after which the same app can go out through TestFlight.
 
-**Any phone, no install:** open `https://<your-render-address>/phone` in the phone's browser.
+**Any phone, no install:** open `https://<username>.pythonanywhere.com/phone` in the phone's browser.
 
 ## 4. Things to try
 
