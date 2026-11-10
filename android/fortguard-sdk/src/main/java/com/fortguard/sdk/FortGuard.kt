@@ -145,7 +145,7 @@ object FortGuard {
         val prompt = android.hardware.biometrics.BiometricPrompt.Builder(activity)
             .setTitle("Confirm it's you")
             .setSubtitle("FortGuard learns how this phone is usually used")
-            .setNegativeButtonText("Cancel")
+            .setNegativeButton("Cancel", activity.mainExecutor, android.content.DialogInterface.OnClickListener { _, _ -> })
             .build()
         prompt.authenticate(android.os.CancellationSignal(), activity.mainExecutor,
             object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
