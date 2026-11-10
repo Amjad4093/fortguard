@@ -209,7 +209,7 @@ class MainActivity : Activity() {
             .apply { setPadding(0, 0, 0, dp(12)) })
 
         val box = card()
-        loginName = input("Full name", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_CAP_WORDS)
+        loginName = input("Full name", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
         loginUser = input("Username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         loginPassword = input("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         // Pre-filled for testers. Set before FortGuard watches the fields, so the fill is not recorded as typing.
