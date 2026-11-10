@@ -198,6 +198,16 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
 .stat span { display: block; font-size: .78rem; color: var(--muted); margin-top: 5px; line-height: 1.35; }
 .heat { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; max-width: 280px; margin: 4px 0 14px; }
 .heat i { display: block; aspect-ratio: 1 / 1.5; border-radius: 3px; background: var(--grey-bg); }
+/* owner profile callouts and customer pages */
+.callout { border-radius: var(--radius); padding: 14px 18px; margin-bottom: 16px; border: 1px solid var(--rule); display: grid; gap: 4px; }
+.callout b { font: 600 .95rem/1.3 var(--sans); }
+.callout span { font-size: .85rem; color: var(--muted); line-height: 1.5; }
+.callout.block { background: var(--block-bg); border-color: transparent; } .callout.block b { color: var(--block); }
+.callout.allow { background: var(--allow-bg); border-color: transparent; } .callout.allow b { color: var(--allow); }
+.callout.info { background: var(--info-bg); border-color: transparent; } .callout.info b { color: var(--info); }
+.namebox { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.namebox input { min-width: 240px; }
+.mono { font-family: var(--mono); font-size: .8rem; }
 </style>
 </head>
 <body>
@@ -230,6 +240,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     <div class="group">Monitor</div>
     <a href="#/dashboard" data-page="dashboard">Dashboard</a>
     <a href="#/cases" data-page="cases">Cases <span class="count hidden" id="nav-open"></span></a>
+    <a href="#/customers" data-page="customers">Customers</a>
     <a href="#/decisions" data-page="decisions">Decisions</a>
     <div class="group">Manage</div>
     <a href="#/devices" data-page="devices">Devices</a>
@@ -340,6 +351,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     say("");
     var v = $("view"); v.innerHTML = "";
     var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
+      customers: parts[1] ? function (x) { return customerDetail(x, decodeURIComponent(parts[1])); } : customers,
       devices: devices, rules: rules, users: users, audit: audit };
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
@@ -545,6 +557,88 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     return [signalCard(d), typingCard(d), touchCard(d), deviceCard(d)];
   }
 
+  // Owner profile: does this session match the profile learned from the customer's allowed sessions?
+  function ownerCallout(d) {
+    var b = d.baseline || {};
+    var pct = b.match_score != null ? Math.round(b.match_score * 100) + "%" : null;
+    if (d.reason_codes && d.reason_codes.indexOf("REASON_BEHAVIORAL_ANOMALY_HIGH") >= 0) {
+      return el("div", { class: "callout block", role: "alert" }, [el("b", { text: "This session does not match the customer's profile" }),
+        el("span", { text: "Match " + (pct || "very low") + " against " + b.sessions + " learned sessions. It may not be the account holder. Check the signals below before acting." })]);
+    }
+    if (b.status === "MATURE") {
+      return el("div", { class: "callout allow" }, [el("b", { text: "Matches the customer's profile" }),
+        el("span", { text: "Match " + pct + " across " + b.sessions + " learned sessions." })]);
+    }
+    return el("div", { class: "callout info" }, [el("b", { text: "Profile still learning" }),
+      el("span", { text: (b.sessions || 0) + " of " + (b.required || "10") + " sessions learned. The profile cannot change a decision until it is complete." })]);
+  }
+
+  async function customers(v) {
+    head(v, "Customers");
+    var data = await call("GET", "/v1/bo/customers");
+    var rows = data.customers.map(function (c) {
+      var levels = c.levels.BLOCK + " block · " + c.levels.STEP_UP + " step-up · " + c.levels.ALLOW + " allow";
+      return el("tr", { class: "link", onclick: function () { location.hash = "#/customers/" + encodeURIComponent(c.user_id); } }, [
+        el("td", {}, [el("div", { text: c.display_name || c.user_id }), c.display_name ? el("small", { class: "mono", text: c.user_id }) : null]),
+        el("td", { class: "num", text: String(c.sessions) }), el("td", { class: "num", text: String(c.devices) }),
+        el("td", {}, [pill(c.owner === "MATURE" ? "ALLOW" : "GREY", c.owner === "MATURE" ? "Profile ready" : (c.owner === "LEARNING" ? "Learning" : "No profile"))]),
+        el("td", { text: levels }), el("td", { class: "num", text: String(c.max_risk) }), el("td", { text: when(c.last_ms) })]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {},
+      ["Customer", "Sessions", "Devices", "Profile", "Decisions", "Top score", "Last seen"].map(function (h) { return el("th", { text: h }); }))]),
+      el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No customers yet. Sessions appear here once the SDK sends them." })]));
+  }
+
+  async function customerDetail(v, uid) {
+    v.appendChild(el("a", { href: "#/customers", class: "back", text: "← All customers" }));
+    var c = await call("GET", "/v1/bo/customers/" + encodeURIComponent(uid));
+    head(v, c.display_name || "Customer", [pill(c.owner_profile.status === "MATURE" ? "ALLOW" : "GREY",
+      c.owner_profile.status === "MATURE" ? "Profile ready" : (c.owner_profile.status === "LEARNING" ? "Learning" : "No profile"))]);
+    var kids = [];
+    kids.push(el("div", { class: "kv-line" }, [el("span", { class: "mono", text: "User ID " + c.user_id })]));
+    if (can("analyst")) {
+      var input = el("input", { type: "text", maxlength: "80", "aria-label": "Customer name", value: c.display_name || "", placeholder: "Name for this customer" });
+      var save = el("button", { class: "primary", type: "button", text: "Save name", onclick: async function () {
+        try { await call("POST", "/v1/bo/customers/" + encodeURIComponent(uid) + "/name", { display_name: input.value }); say("Name saved."); route(); }
+        catch (e) { say(e.message, true); }
+      } });
+      kids.push(el("div", { class: "namebox" }, [input, save]));
+    }
+    v.appendChild(card("Customer", kids));
+    if (c.latest) v.appendChild(ownerCallout(c.latest));
+
+    var op = c.owner_profile;
+    var feats = Object.keys(op.features || {}).map(function (k) {
+      var st = op.features[k];
+      return [k.replace(/^ft_/, "").replace(/_/g, " "), formatFeature(st[0], "") + " ± " + formatFeature(st[1], "")];
+    });
+    v.appendChild(card("Owner profile", [
+      op.status === "MATURE" ? el("p", { class: "hint", text: "Built from " + op.sessions + " allowed sessions. Each new session is compared with it." })
+        : el("p", { class: "hint", text: op.sessions + " of " + op.required + " sessions learned. The profile starts counting toward decisions once complete." }),
+      feats.length ? kvList(feats) : el("div", { class: "empty", text: "No profile features yet." })]));
+
+    var devRows = c.devices.map(function (d) {
+      return el("tr", {}, [el("td", { class: "mono", text: short(d.device_guid, 18) }), el("td", { text: d.model || "–" }),
+        el("td", { text: (d.os || d.platform || "–") + (d.os_version ? " " + d.os_version : "") }), el("td", { text: d.integrity_level || "–" }),
+        el("td", { text: String(d.status || "–").toLowerCase() }), el("td", { text: d.last_seen_ms ? when(d.last_seen_ms) : "–" })]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("h2", { text: "Devices" }), el("table", {}, [el("thead", {}, [el("tr", {},
+      ["Device", "Model", "OS", "Attestation", "Status", "Last seen"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, devRows)]),
+      devRows.length ? null : el("div", { class: "empty", text: "No devices yet." })]));
+
+    var sesRows = c.sessions.map(function (s) {
+      return el("tr", {}, [el("td", { text: s.time_ms ? when(s.time_ms) : "–" }), el("td", { class: "mono", text: short(s.session_id, 16) }),
+        el("td", { text: (s.event_type || "").replace(/_/g, " ").toLowerCase() }), el("td", { text: money(s.amount, s.currency) }),
+        el("td", {}, [pill(s.risk_level)]), el("td", { text: String(s.risk_score) })]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("h2", { text: "Sessions" }), el("table", {}, [el("thead", {}, [el("tr", {},
+      ["Time", "Session", "Event", "Amount", "Decision", "Score"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, sesRows)])]));
+
+    if (c.latest) {
+      v.appendChild(el("div", { class: "two" }, [el("div", {}, measurementCards(c.latest))]));
+    }
+  }
+
   async function caseDetail(v, id) {
     v.appendChild(el("a", { href: "#/cases", class: "back", text: "← All cases" }));
     var c = await call("GET", "/v1/bo/cases/" + id);
@@ -564,7 +658,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
      ["Signals used", d.signals_used + (d.degraded ? " (degraded mode)" : "")], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
-    var left = [card("Why FortGuard flagged it", why), card("Details", [facts])];
+    var left = [ownerCallout(d), card("Why FortGuard flagged it", why), card("Details", [facts])];
     left = left.concat(measurementCards(d));
     if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
       return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);

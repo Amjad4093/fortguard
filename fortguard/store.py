@@ -137,6 +137,6 @@ class SessionStore:
         for name in ("os", "os_version"):
             if name in env:
                 session.env[name] = env[name]
-        for name in ("charging", "network_type", "locale", "timezone") + tuple(schema.ENV_EXTRA_NUMBERS):
+        for name in ("charging", "network_type", "locale", "timezone", "device_model") + tuple(schema.ENV_EXTRA_NUMBERS):
             if name in env:
                 session.env[name] = env[name]

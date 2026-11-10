@@ -33,9 +33,10 @@ ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "app_install_age_days": (0, 36500, True),
     "free_storage_mb": (0, 10_000_000, True),
 }
+DEVICE_MODEL_RE = re.compile(r"^[A-Za-z0-9 _\-.()/+]{1,80}$")  # e.g. "Pixel 8", "SM-S921B"
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
 TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
-ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "charging", "network_type", "locale", "timezone"}
+ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone"}
                | set(ENV_EXTRA_NUMBERS))
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
@@ -129,6 +130,8 @@ def validate_telemetry(p):
         not isinstance(env["os_version"], str) or not VERSION_RE.match(env["os_version"])
     ):
         _fail("invalid_request", "environment.os_version is not a valid version string")
+    if "device_model" in env and (not isinstance(env["device_model"], str) or not DEVICE_MODEL_RE.match(env["device_model"])):
+        _fail("invalid_request", "environment.device_model is not a valid model name")
     if "charging" in env and not isinstance(env["charging"], bool):
         _fail("invalid_request", "environment.charging must be true or false")
     for name, (low, high, integer) in ENV_EXTRA_NUMBERS.items():

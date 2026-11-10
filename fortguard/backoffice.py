@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time_ms INTEGER NOT NULL, actor TEXT NOT NULL,
     action TEXT NOT NULL, target TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS customers (
+    user_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, updated_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, label TEXT NOT NULL,
     decided_level TEXT, source TEXT, note TEXT, time_ms INTEGER NOT NULL);
@@ -308,6 +310,14 @@ def _case_row(r, with_decision=False):
 
 
 # --- HTTP -----------------------------------------------------------------------------------------------
+
+CUSTOMER_SCAN_LIMIT = 5000  # newest decisions searched when grouping by customer
+
+
+def _recent_decisions(bo):
+    rows = bo.q("SELECT record FROM decisions ORDER BY id DESC LIMIT ?", (CUSTOMER_SCAN_LIMIT,))
+    return [json.loads(r["record"]) for r in rows]
+
 
 def register(app, *, bo, api_key, registry, dev_mode):
     def body():
@@ -539,8 +549,102 @@ def register(app, *, bo, api_key, registry, dev_mode):
             raise ValidationFailure(400, "invalid_request", "bad customer id")
         from flask import current_app
         out = bo.erase_customer(user_id, current_app.fortguard_baselines)
+        bo.x("DELETE FROM customers WHERE user_id=?", (user_id,))
         bo.audit(user["username"], "customer_erase", f"customer:{user_id}", out)
         return jsonify({"user_id": user_id, "deleted": out})
+
+    # customers: everything the decision log holds for one user id, grouped for the portal
+    def _check_user_id(user_id):
+        if not 1 <= len(user_id) <= 64:
+            raise ValidationFailure(400, "invalid_request", "bad customer id")
+
+    def _owner_status(baselines, user_id):
+        prof = baselines.profile(user_id)
+        n = prof["sessions"]
+        status = "MATURE" if n >= config.BASELINE_MIN_SESSIONS else ("LEARNING" if n else "NONE")
+        return {"status": status, "sessions": n, "required": config.BASELINE_MIN_SESSIONS, "features": prof["stats"]}
+
+    @app.get("/v1/bo/customers")
+    def bo_customers():
+        need("viewer")
+        from flask import current_app
+        names = {r["user_id"]: r["display_name"] for r in bo.q("SELECT user_id, display_name FROM customers")}
+        groups = {}
+        for rec in _recent_decisions(bo):
+            g = groups.setdefault(rec["user_id"], {"user_id": rec["user_id"], "sessions": 0, "last_ms": 0,
+                                                   "devices": set(), "levels": Counter(), "max_risk": 0})
+            g["sessions"] += 1
+            g["last_ms"] = max(g["last_ms"], rec.get("time_ms") or 0)
+            if rec.get("device_guid"):
+                g["devices"].add(rec["device_guid"])
+            g["levels"][rec["risk_level"]] += 1
+            g["max_risk"] = max(g["max_risk"], rec.get("risk_score") or 0)
+        rows = []
+        for uid, g in groups.items():
+            rows.append({"user_id": uid, "display_name": names.get(uid), "sessions": g["sessions"],
+                         "devices": len(g["devices"]), "last_ms": g["last_ms"], "max_risk": g["max_risk"],
+                         "levels": {k: g["levels"][k] for k in ("ALLOW", "STEP_UP", "BLOCK")},
+                         "owner": _owner_status(current_app.fortguard_baselines, uid)["status"]})
+        rows.sort(key=lambda r: -r["last_ms"])
+        return jsonify({"customers": rows[:200]})
+
+    @app.get("/v1/bo/customers/<user_id>")
+    def bo_customer(user_id):
+        need("viewer")
+        _check_user_id(user_id)
+        from flask import current_app
+        recs = sorted((r for r in _recent_decisions(bo) if r["user_id"] == user_id),
+                      key=lambda r: r.get("time_ms") or 0, reverse=True)
+        name = bo.q("SELECT display_name FROM customers WHERE user_id=?", (user_id,))
+        if not recs and not name:
+            raise ValidationFailure(404, "not_found", "no decisions for this customer")
+        devices = {}
+        for rec in recs:  # newest first, so the first record seen for a device is its latest
+            guid = rec.get("device_guid")
+            if not guid:
+                continue
+            if guid not in devices:
+                dev = registry.get(guid)
+                env = rec.get("environment") or {}
+                devices[guid] = {
+                    "device_guid": guid, "platform": rec.get("device_platform") or (dev.platform if dev else None),
+                    "model": env.get("device_model"), "os": env.get("os"), "os_version": env.get("os_version"),
+                    "integrity_level": rec.get("device_integrity"),
+                    "status": dev.status if dev else "UNKNOWN",
+                    "last_seen_ms": rec.get("time_ms"), "first_seen_ms": rec.get("time_ms"),
+                }
+            else:
+                devices[guid]["first_seen_ms"] = rec.get("time_ms")
+        return jsonify({
+            "user_id": user_id,
+            "display_name": name[0]["display_name"] if name else None,
+            "owner_profile": _owner_status(current_app.fortguard_baselines, user_id),
+            "devices": list(devices.values()),
+            "sessions": [{"time_ms": r.get("time_ms"), "session_id": r["session_id"], "event_type": r.get("event_type"),
+                          "amount": r.get("amount"), "currency": r.get("currency"), "risk_level": r["risk_level"],
+                          "risk_score": r["risk_score"], "action": r.get("action_recommended"),
+                          "device_guid": r.get("device_guid")} for r in recs[:100]],
+            "latest": recs[0] if recs else None,  # full numbers behind the newest decision
+        })
+
+    @app.post("/v1/bo/customers/<user_id>/name")
+    def bo_customer_name(user_id):
+        user = need("analyst")
+        _check_user_id(user_id)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise ValidationFailure(400, "invalid_json", "body must be a JSON object")
+        name = body.get("display_name")
+        if name is not None and (not isinstance(name, str) or len(name.strip()) > 80
+                                 or any(ord(ch) < 32 for ch in name)):
+            raise ValidationFailure(400, "invalid_request", "display_name must be plain text up to 80 characters")
+        name = (name or "").strip()
+        if name:
+            bo.x("INSERT OR REPLACE INTO customers VALUES (?,?,?)", (user_id, name, bo.now_ms()))
+        else:
+            bo.x("DELETE FROM customers WHERE user_id=?", (user_id,))
+        bo.audit(user["username"], "customer_name", f"customer:{user_id}", {"named": bool(name)})
+        return jsonify({"user_id": user_id, "display_name": name or None})
 
     # users
     @app.get("/v1/bo/users")

@@ -395,3 +395,46 @@ def test_typing_speed_buckets_cover_the_range():
 def test_empty_overview_has_no_coverage_rows(admin):
     status, o = admin.call("get", "/v1/bo/overview")
     assert status == 200 and o["coverage"] == [] and o["last_24h"]["total"] == 0
+
+
+# --- Customers: grouped by user id, with device details and a name entered by staff -----------------
+
+
+def test_customers_group_decisions_by_user_with_device_and_owner_status(api, admin, make_session):
+    for scenario in ("genuine", "coached_scam"):
+        run_session(api, make_session(scenario))
+    status, data = admin.call("get", "/v1/bo/customers")
+    assert status == 200 and data["customers"]
+    row = data["customers"][0]
+    assert row["sessions"] >= 1 and row["devices"] >= 1 and row["owner"] in ("NONE", "LEARNING", "MATURE")
+    assert set(row["levels"]) == {"ALLOW", "STEP_UP", "BLOCK"}
+
+    status, one = admin.call("get", "/v1/bo/customers/" + row["user_id"])
+    assert status == 200 and one["user_id"] == row["user_id"]
+    assert one["devices"] and one["devices"][0]["device_guid"]
+    assert one["latest"] is not None and "captured" in one["latest"]
+    assert one["owner_profile"]["required"] == config.BASELINE_MIN_SESSIONS
+
+
+def test_unknown_customer_is_404(admin):
+    assert admin.call("get", "/v1/bo/customers/nobody-here-123")[0] == 404
+
+
+def test_naming_a_customer_is_audited_and_analyst_only(api, admin, make_session, bo_app):
+    run_session(api, make_session("genuine"))
+    _, data = admin.call("get", "/v1/bo/customers")
+    uid = data["customers"][0]["user_id"]
+    status, out = admin.call("post", f"/v1/bo/customers/{uid}/name", {"display_name": "Ali Raza"})
+    assert status == 200 and out["display_name"] == "Ali Raza"
+    assert admin.call("get", f"/v1/bo/customers/{uid}")[1]["display_name"] == "Ali Raza"
+    assert any(a["action"] == "customer_name" for a in admin.call("get", "/v1/bo/audit")[1]["audit"])
+    assert admin.call("post", f"/v1/bo/customers/{uid}/name", {"display_name": "bad\x07name"})[0] == 400
+    assert admin.call("post", f"/v1/bo/customers/{uid}/name", {"display_name": "x" * 81})[0] == 400
+    assert admin.call("post", f"/v1/bo/customers/{uid}/name", {"display_name": ""})[0] == 200
+    assert admin.call("get", f"/v1/bo/customers/{uid}")[1]["display_name"] is None
+
+
+def test_device_model_is_validated_and_kept_for_the_case(api, make_session, clock):
+    from fortguard import schema
+    assert schema.DEVICE_MODEL_RE.match("Pixel 8") and schema.DEVICE_MODEL_RE.match("SM-S921B")
+    assert not schema.DEVICE_MODEL_RE.match("<script>") and not schema.DEVICE_MODEL_RE.match("x" * 81)
