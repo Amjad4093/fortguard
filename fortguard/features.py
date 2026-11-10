@@ -83,6 +83,48 @@ def key_timings(keys):
     return holds, flights
 
 
+def swipe_speeds(touch):
+    """Speed in pixels per second for each swipe that swipe_deviations counts."""
+    out = []
+    for g in _gestures(touch):
+        points = [(e["x"], e["y"]) for e in g]
+        if len(points) < 4:
+            continue
+        length = math.hypot(points[-1][0] - points[0][0], points[-1][1] - points[0][1])
+        if length < config.SWIPE_MIN_PX:
+            continue
+        duration = g[-1]["timestamp_ms"] - g[0]["timestamp_ms"]
+        if duration > 0:
+            out.append(length / duration * 1000.0)
+    return out
+
+
+def typing_totals(keys):
+    """(characters inserted, characters deleted, active typing milliseconds) across one session.
+
+    Only gaps between keystrokes in the same field count as typing time, and only when they are short
+    enough to be typing rather than a pause.
+    """
+    inserted = deleted = 0
+    active_ms = 0
+    prev = None
+    for e in sorted((e for e in keys if e["event_type"] == "DOWN"), key=lambda e: e["ts"]):
+        inserted += e.get("inserted", 0)
+        deleted += e.get("deleted", 0)
+        if prev is not None and prev[1] == e.get("field"):
+            gap = e["ts"] - prev[0]
+            if 0 < gap <= config.TYPING_MAX_GAP_MS:
+                active_ms += gap
+        prev = (e["ts"], e.get("field"))
+    return inserted, deleted, active_ms
+
+
+def tap_intervals(touch):
+    """Gaps in ms between consecutive touch-downs that are close enough to be one interaction."""
+    downs = sorted(e["timestamp_ms"] for e in touch if e["event_type"] == "DOWN")
+    return [b - a for a, b in zip(downs, downs[1:]) if 0 < b - a <= config.TAP_MAX_GAP_MS]
+
+
 def _variance_sum(samples):
     if len(samples) < 2:
         return None
@@ -161,6 +203,11 @@ def compute_features_full(session):
     deviations = swipe_deviations(touch)
     holds, flights = key_timings(keys)
     pastes = [e for e in ui if e["event_type"] == "PASTE"]
+    inserted, deleted, active_ms = typing_totals(keys)
+    pressures = [e["pressure"] for e in touch if "pressure" in e]
+    sizes = [e["size"] for e in touch if "size" in e]
+    taps = tap_intervals(touch)
+    speeds = swipe_speeds(touch)
     return {
         "ft_touch_count": sum(1 for e in touch if e["event_type"] == "DOWN"),
         "ft_swipe_count": len(deviations),
@@ -180,4 +227,11 @@ def compute_features_full(session):
         "ft_pasting_frequency": sum(1 for e in pastes if e.get("field") in SENSITIVE_PASTE_FIELDS),
         "ft_paste_beneficiary_count": sum(1 for e in pastes if e.get("field") == "beneficiary_account"),
         "ft_hesitation_index": hesitation_index(touch, keys, ui),
+        "ft_typing_speed_cpm": (inserted * 60000.0 / active_ms) if inserted and active_ms else None,
+        "ft_correction_rate": min(1.0, deleted / max(inserted, 1)) if inserted or deleted else None,
+        "ft_touch_pressure_mean": statistics.fmean(pressures) if pressures else None,
+        "ft_touch_pressure_std": statistics.pstdev(pressures) if len(pressures) > 1 else None,
+        "ft_touch_size_mean": statistics.fmean(sizes) if sizes else None,
+        "ft_tap_interval_mean_ms": statistics.fmean(taps) if taps else None,
+        "ft_swipe_speed_px_s": statistics.fmean(speeds) if speeds else None,
     }

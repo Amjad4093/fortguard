@@ -44,7 +44,7 @@ UI_TYPES = {"FOCUS", "PASTE", "SUBMIT"}
 FIELDS = {"username", "password", "otp", "beneficiary_account", "amount", "other"}
 
 TOUCH_KEYS = {"event_type", "x", "y", "pressure", "size", "timestamp_ms"}
-KEY_KEYS = {"event_type", "ts", "field"}
+KEY_KEYS = {"event_type", "ts", "field", "inserted", "deleted"}  # inserted/deleted: character counts only
 UI_KEYS = {"event_type", "field", "ts"}
 SENSOR_KEYS = {"x", "y", "z", "ts"}
 
@@ -165,6 +165,9 @@ def validate_telemetry(p):
 
     for e in _need_list(p, "key_events", config.MAX_KEYS_PER_BATCH):
         _check_event(e, "key", KEY_KEYS, KEY_TYPES)
+        for name in ("inserted", "deleted"):
+            if name in e:
+                _need_num(e[name], f"key {name}", 0, 1000)
     for e in _need_list(p, "ui_events", config.MAX_UI_PER_BATCH):
         _check_event(e, "ui", UI_KEYS, UI_TYPES)
 

@@ -63,8 +63,10 @@ internal class FieldWatcher(private val buffer: EventBuffer, private val field: 
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
         val now = System.currentTimeMillis()
         when {
+            // A paste is not typing, so it adds no character counts.
             count >= PASTE_MIN_CHARS && count - before >= PASTE_MIN_CHARS -> buffer.ui("PASTE", field, now)
-            count > 0 || before > 0 -> buffer.key("DOWN", field, now)
+            // Only the number of characters added and removed is sent, never which characters.
+            count > 0 || before > 0 -> buffer.key("DOWN", field, now, inserted = count, deleted = before)
         }
     }
 

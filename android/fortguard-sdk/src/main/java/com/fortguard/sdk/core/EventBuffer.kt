@@ -52,9 +52,19 @@ class EventBuffer(
         ), 0)
     }
 
-    fun key(type: String, field: Field, ts: Long) {
+    /**
+     * One keystroke or edit. [inserted] and [deleted] are character counts only (never the characters),
+     * which give typing speed and correction rate on the server.
+     */
+    fun key(type: String, field: Field, ts: Long, inserted: Int = 0, deleted: Int = 0) {
         require(type == "DOWN" || type == "UP")
-        add(keys, maxKeys, mapOf("event_type" to type, "ts" to ts, "field" to field.wire), 1)
+        val item = LinkedHashMap<String, Any?>()
+        item["event_type"] = type
+        item["ts"] = ts
+        item["field"] = field.wire
+        if (inserted > 0) item["inserted"] = inserted.coerceAtMost(1000)
+        if (deleted > 0) item["deleted"] = deleted.coerceAtMost(1000)
+        add(keys, maxKeys, item, 1)
     }
 
     fun ui(type: String, field: Field, ts: Long) {

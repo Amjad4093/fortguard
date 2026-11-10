@@ -56,6 +56,8 @@ FORCE_STEP_UP_MIN_SCORE = 600
 
 # --- Feature and rule thresholds ----------------------------------------------
 SWIPE_MIN_PX = 30                 # a gesture shorter than this is a tap, not a swipe
+TYPING_MAX_GAP_MS = 2000           # gaps between keystrokes longer than this are pauses, not typing
+TAP_MAX_GAP_MS = 3000              # gaps between taps longer than this are separate interactions
 SCRIPTED_MIN_KEYS = 6             # keys needed before timing is judged
 SCRIPTED_FLIGHT_STD_MS = 3.0      # human flight times vary far more than this
 LINEAR_MIN_SWIPES = 3

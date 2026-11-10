@@ -92,6 +92,17 @@ class FeatureState:
         self.accel_recent = deque(maxlen=config.TREMOR_WINDOW)
         self.last_accel_ts = None
         self.last_gyro_ts = None
+        # typing (character counts only), touch pressure and size, taps and swipe speed
+        self.typed_inserted = 0
+        self.typed_deleted = 0
+        self.typing_active_ms = 0
+        self.prev_down = None          # (ts, field) of the last key DOWN, in any field
+        self.pressure = Running()
+        self.touch_size = Running()
+        self.taps = Running()
+        self.last_tap_down = None
+        self.gesture_ts = None         # timestamps of the gesture in progress
+        self.swipe_speed = Running()
 
     # --- updates ---------------------------------------------------------------------------
 
@@ -162,25 +173,50 @@ class FeatureState:
 
         for e in touch:
             kind = e["event_type"]
+            ts = e["timestamp_ms"]
+            if "pressure" in e:
+                self.pressure.add(e["pressure"])
+            if "size" in e:
+                self.touch_size.add(e["size"])
             if kind == "DOWN":
                 self.touch_downs += 1
                 self.gesture = [(e["x"], e["y"])]
+                self.gesture_ts = [ts]
+                if self.last_tap_down is not None:
+                    gap = ts - self.last_tap_down
+                    if 0 < gap <= config.TAP_MAX_GAP_MS:
+                        self.taps.add(gap)
+                self.last_tap_down = ts
             elif kind == "MOVE" and self.gesture is not None:
                 self.gesture.append((e["x"], e["y"]))
+                self.gesture_ts.append(ts)
             elif kind == "UP" and self.gesture is not None:
                 self.gesture.append((e["x"], e["y"]))
+                self.gesture_ts.append(ts)
                 pts = self.gesture
                 self.gesture = None
                 if len(pts) >= 4 and math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]) >= config.SWIPE_MIN_PX:
                     dev = _mean_deviation(pts)
                     if dev is not None:
                         self.swipes.add(dev)
-            self.last_touch_ts = e["timestamp_ms"]
+                        duration = self.gesture_ts[-1] - self.gesture_ts[0]
+                        if duration > 0:
+                            length = math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1])
+                            self.swipe_speed.add(length / duration * 1000.0)
+                self.gesture_ts = None
+            self.last_touch_ts = ts
 
     def _keys(self, keys):
         for e in keys:
             if e["event_type"] == "DOWN":
                 self.key_downs += 1
+                self.typed_inserted += e.get("inserted", 0)
+                self.typed_deleted += e.get("deleted", 0)
+                if self.prev_down is not None and self.prev_down[1] == e.get("field"):
+                    gap = e["ts"] - self.prev_down[0]
+                    if 0 < gap <= config.TYPING_MAX_GAP_MS:
+                        self.typing_active_ms += gap
+                self.prev_down = (e["ts"], e.get("field"))
                 same = e.get("field") == self.last_field
                 if self.pending_down is not None and same:
                     self.flights.add(e["ts"] - self.pending_down)
@@ -223,4 +259,13 @@ class FeatureState:
             "ft_pasting_frequency": self.paste_sensitive,
             "ft_paste_beneficiary_count": self.paste_beneficiary,
             "ft_hesitation_index": min(1.0, self.paused_ms / config.HESITATION_FULL_MS),
+            "ft_typing_speed_cpm": (self.typed_inserted * 60000.0 / self.typing_active_ms
+                                    if self.typed_inserted and self.typing_active_ms else None),
+            "ft_correction_rate": (min(1.0, self.typed_deleted / max(self.typed_inserted, 1))
+                                   if self.typed_inserted or self.typed_deleted else None),
+            "ft_touch_pressure_mean": self.pressure.mean if self.pressure.n else None,
+            "ft_touch_pressure_std": self.pressure.pstdev() if self.pressure.n > 1 else None,
+            "ft_touch_size_mean": self.touch_size.mean if self.touch_size.n else None,
+            "ft_tap_interval_mean_ms": self.taps.mean if self.taps.n else None,
+            "ft_swipe_speed_px_s": self.swipe_speed.mean if self.swipe_speed.n else None,
         }
