@@ -390,7 +390,8 @@ tr.link { cursor: pointer; }
     v.appendChild(el("div", { class: "tiles" }, [
       tile(t.total, "Decisions, last 24 h"), tile(t.ALLOW, "Allowed"), tile(t.STEP_UP, "Stepped up"), tile(t.BLOCK, "Blocked"),
       tile(o.cases.OPEN + o.cases.INVESTIGATING, "Cases to work"), tile(o.cases.CONFIRMED_FRAUD, "Confirmed fraud"),
-      tile(o.devices.total, "Devices (" + o.devices.revoked + " revoked)")
+      tile(o.devices.total, "Devices (" + o.devices.revoked + " revoked)"),
+      tile(duration(o.time_in_app_ms), "Time in the app, all customers")
     ]));
     var fb = o.feedback;
     if (fb && (fb.fraud_reported || fb.genuine_reported)) {
@@ -417,6 +418,13 @@ tr.link { cursor: pointer; }
       card("Decisions per hour (last 24 h)", o.hourly.length ? [chart, legend] : [el("div", { class: "empty", text: "No decisions yet." + (S.dev ? " Use “Run sample scenarios” or the demo apps." : "") })]),
       card("Most common reasons", reasons)
     ]));
+    var models = o.devices_by_model || [];
+    var mmax = Math.max.apply(null, [1].concat(models.map(function (m) { return m.devices; })));
+    v.appendChild(card("Devices by model", [el("p", { class: "hint", text: "The model each enrolled device reported with its latest decision." })].concat(
+      models.length ? models.map(function (m) {
+        return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: m.model }),
+          el("div", { class: "bar" }, [el("i", { style: "width:" + (m.devices / mmax * 100) + "%" })])]), el("b", { text: String(m.devices) })]);
+      }) : [el("div", { class: "empty", text: "No device models yet." })])));
     if (o.coverage && o.coverage.length) {
       var cov = o.coverage.map(function (r) {
         return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: SIGNAL_LABEL[r.signal] || r.signal }),
@@ -435,6 +443,19 @@ tr.link { cursor: pointer; }
     }
   }
   function tile(n, label) { return el("div", { class: "tile" }, [el("b", { text: String(n) }), el("span", { text: label })]); }
+  // Time in the app, from milliseconds: "2h 14m", "38 min" or "under a minute".
+  function duration(ms) {
+    if (!ms) return "0 min";
+    var m = Math.round(ms / 60000);
+    if (m < 1) return "under a minute";
+    return m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + " min";
+  }
+  // A labelled share as a bar, for coverage and maturity.
+  function meterRow(label, share, note) {
+    var pct = Math.round(Math.max(0, Math.min(1, share)) * 100);
+    return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: label + " · " + note }),
+      el("div", { class: "bar" }, [el("i", { style: "width:" + pct + "%" })])]), el("b", { text: pct + "%" })]);
+  }
   async function simulate(e) {
     e.target.disabled = true; say("Running sample scenarios…");
     try { var r = await call("POST", "/v1/bo/dev/simulate"); say("Added " + r.results.length + " synthetic sessions."); route(); refreshCount(); }
@@ -602,17 +623,18 @@ tr.link { cursor: pointer; }
     v.appendChild(el("div", { class: "tiles" }, [tile(data.customers.length, "Customers seen"),
       tile(data.customers.filter(function (c) { return c.owner === "MATURE"; }).length, "With a ready profile"),
       tile(data.customers.filter(function (c) { return c.levels.BLOCK > 0; }).length, "Had a blocked session"),
-      tile(data.customers.reduce(function (n, c) { return n + c.sessions; }, 0), "Sessions in total")]));
+      tile(data.customers.reduce(function (n, c) { return n + c.sessions; }, 0), "Sessions in total"),
+      tile(duration(data.customers.reduce(function (n, c) { return n + (c.active_ms || 0); }, 0)), "Time in the app, all customers")]));
     var rows = data.customers.map(function (c) {
       var levels = c.levels.BLOCK + " block · " + c.levels.STEP_UP + " step-up · " + c.levels.ALLOW + " allow";
       return el("tr", { class: "link", onclick: function () { location.hash = "#/customers/" + encodeURIComponent(c.user_id); } }, [
         el("td", {}, [el("div", { text: c.display_name || c.user_id }), c.display_name ? el("small", { class: "mono", text: c.user_id }) : null]),
-        el("td", { class: "num", text: String(c.sessions) }), el("td", { class: "num", text: String(c.devices) }),
-        el("td", {}, [pill(c.owner === "MATURE" ? "ALLOW" : "GREY", c.owner === "MATURE" ? "Profile ready" : (c.owner === "LEARNING" ? "Learning" : "No profile"))]),
+        el("td", { class: "num", text: String(c.sessions) }), el("td", { class: "num", text: String(c.devices) }), el("td", { text: duration(c.active_ms) }),
+        el("td", {}, [pill(c.owner === "MATURE" ? "ALLOW" : "GREY", (c.owner === "MATURE" ? "Profile ready" : (c.owner === "LEARNING" ? "Learning" : "No profile")) + " · " + Math.round((c.maturity || 0) * 100) + "%")]),
         el("td", { text: levels }), el("td", { class: "num", text: String(c.max_risk) }), el("td", { text: when(c.last_ms) })]);
     });
     v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {},
-      ["Customer", "Sessions", "Devices", "Profile", "Decisions", "Top score", "Last seen"].map(function (h) { return el("th", { text: h }); }))]),
+      ["Customer", "Sessions", "Devices", "Time in app", "Profile", "Decisions", "Top score", "Last seen"].map(function (h) { return el("th", { text: h }); }))]),
       el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No customers yet. Sessions appear here once the SDK sends them." })]));
   }
 
@@ -633,6 +655,16 @@ tr.link { cursor: pointer; }
     }
     v.appendChild(card("Customer", kids));
     if (c.latest) v.appendChild(ownerCallout(c.latest));
+    var u = c.usage || {};
+    var cov = c.coverage || { reporting: 0, of: 0, names: [] };
+    v.appendChild(el("div", { class: "tiles" }, [tile(duration(u.active_ms), "Time in the app"),
+      tile(u.batches || 0, "Batches received"), tile(u.last_ms ? when(u.last_ms) : "–", "Last in the app"),
+      tile(cov.reporting + " of " + cov.of, "Sensors reporting, latest session")]));
+    v.appendChild(card("How much FortGuard knows about this customer", [
+      el("p", { class: "hint", text: "Profile maturity is how much history has been built for this customer. It is not the accuracy of a decision: accuracy is measured only against confirmed fraud and genuine outcomes." }),
+      meterRow("Profile maturity", c.maturity || 0, c.owner_profile.sessions + " of " + c.owner_profile.required + " sessions learned"),
+      meterRow("Sensor coverage, latest session", cov.of ? cov.reporting / cov.of : 0,
+        cov.names.length ? "reporting: " + cov.names.join(", ") : "no sensor data in the latest session")]));
 
     var op = c.owner_profile;
     var feats = Object.keys(op.features || {}).map(function (k) {
@@ -776,10 +808,13 @@ tr.link { cursor: pointer; }
         if (!confirm("Revoke " + d.device_guid + "?")) return;
         try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(d.device_guid) + "/revoke"); route(); } catch (e) { say(e.message, true); }
       } }) : null;
-      return el("tr", {}, [el("td", { text: d.device_guid }), el("td", { text: d.platform }), el("td", { text: d.app_id }), el("td", { text: d.integrity_level }),
-        el("td", {}, [pill(d.status)]), el("td", { text: "v" + d.key_version + " · " + d.key_sha256.slice(0, 10) }), el("td", { text: when(d.enrolled_at_ms) }), el("td", {}, [action])]);
+      return el("tr", {}, [el("td", {}, [el("div", { text: d.model || "Model not reported yet" }), el("small", { class: "mono", text: short(d.device_guid, 18) })]),
+        el("td", { text: (d.os || d.platform) + (d.os_version ? " " + d.os_version : "") }), el("td", { text: d.app_id }),
+        el("td", { text: d.integrity_level || "–" }), el("td", { text: d.owner_enrolled ? "Yes" : "No" }),
+        el("td", { text: (d.customers || []).join(", ") || "–" }), el("td", { text: d.last_seen_ms ? when(d.last_seen_ms) : "–" }),
+        el("td", {}, [pill(d.status)]), el("td", { text: when(d.enrolled_at_ms) }), el("td", {}, [action])]);
     });
-    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Device", "Platform", "App", "Attestation", "Status", "Key", "Enrolled", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Device", "OS", "App", "Attestation", "Owner", "Customers", "Last seen", "Status", "Enrolled", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
       rows.length ? null : el("div", { class: "empty", text: "No devices enrolled yet. Open a demo app to enroll one." })]));
   }
 

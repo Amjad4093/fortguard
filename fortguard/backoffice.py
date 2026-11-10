@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS customers (
     user_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, updated_ms INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS usage (
+    user_id TEXT PRIMARY KEY, first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL,
+    active_ms INTEGER NOT NULL DEFAULT 0, batches INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, label TEXT NOT NULL,
     decided_level TEXT, source TEXT, note TEXT, time_ms INTEGER NOT NULL);
@@ -140,6 +143,21 @@ class BackOffice:
 
     def now_ms(self):
         return int(self.clock() * 1000)
+
+    def note_activity(self, user_id, span_ms, name=None):
+        """Adds one batch of time in the app to a customer. The span is capped per batch, so a long gap
+        between batches is never counted as use. The first name a device sends is kept; an analyst can rename."""
+        now = self.now_ms()
+        span = max(0, min(int(span_ms), USAGE_BATCH_CAP_MS))
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM usage WHERE user_id=?", (user_id,)).fetchone():
+                self.db.execute("UPDATE usage SET last_ms=?, active_ms=active_ms+?, batches=batches+1 WHERE user_id=?",
+                                (now, span, user_id))
+            else:
+                self.db.execute("INSERT INTO usage VALUES (?,?,?,?,1)", (user_id, now, now, span))
+            if name and name.strip():
+                self.db.execute("INSERT OR IGNORE INTO customers VALUES (?,?,?)", (user_id, name.strip(), now))
+            self.db.commit()
 
     def q(self, sql, args=()):
         with self.lock:
@@ -312,6 +330,35 @@ def _case_row(r, with_decision=False):
 # --- HTTP -----------------------------------------------------------------------------------------------
 
 CUSTOMER_SCAN_LIMIT = 5000  # newest decisions searched when grouping by customer
+USAGE_BATCH_CAP_MS = 60_000  # no batch counts more than a minute of time in the app
+
+
+def _latest_by_device(bo):
+    """The newest decision per device, and the customers seen on each device."""
+    latest, users = {}, {}
+    for rec in _recent_decisions(bo):  # newest first
+        guid = rec.get("device_guid")
+        if guid:
+            latest.setdefault(guid, rec)
+            users.setdefault(guid, set()).add(rec["user_id"])
+    return latest, users
+
+
+def _usage_of(bo, user_id):
+    row = bo.q("SELECT first_ms, last_ms, active_ms, batches FROM usage WHERE user_id=?", (user_id,))
+    return dict(row[0]) if row else {"first_ms": None, "last_ms": None, "active_ms": 0, "batches": 0}
+
+
+def _maturity(status):
+    """Share of the profile built so far: learned sessions against the number needed before the profile is used."""
+    return round(min(1.0, status["sessions"] / status["required"]), 3)
+
+
+def _coverage(latest):
+    """Which of the sensors the app reads reported data in the newest session. A sensor the phone lacks shows as not reporting."""
+    captured = (latest or {}).get("captured") or {}
+    reporting = [n for n in config.SENSOR_NAMES if captured.get(n, 0) > 0]
+    return {"reporting": len(reporting), "of": len(config.SENSOR_NAMES), "names": reporting}
 
 
 def _recent_decisions(bo):
@@ -391,6 +438,10 @@ def register(app, *, bo, api_key, registry, dev_mode):
             "coverage": [{"signal": k, "decisions": seen[k], "share": round(seen[k] / total, 3) if total else 0}
                          for k in SIGNAL_KEYS] if total else [],
             "typing_speed": [{"label": label, "decisions": cpm_buckets[label]} for label in CPM_LABELS],
+            "time_in_app_ms": sum(r["active_ms"] for r in bo.q("SELECT active_ms FROM usage")),
+            "devices_by_model": [{"model": m, "devices": n} for m, n in Counter(
+                ((rec.get("environment") or {}).get("device_model") or "Unknown")
+                for rec in _latest_by_device(bo)[0].values()).most_common(8)],
         })
 
     # cases
@@ -487,12 +538,19 @@ def register(app, *, bo, api_key, registry, dev_mode):
     @app.get("/v1/bo/devices")
     def bo_devices():
         need("viewer")
-        rows = [
-            {"device_guid": d.device_guid, "app_id": d.app_id, "platform": d.platform, "integrity_level": d.integrity,
-             "status": d.status, "key_version": d.key_version, "key_sha256": d.key_sha256[:16],
-             "enrolled_at_ms": int(d.enrolled_at * 1000)}
-            for d in registry.all()
-        ]
+        latest, users = _latest_by_device(bo)
+        rows = []
+        for d in registry.all():
+            rec = latest.get(d.device_guid) or {}
+            env = rec.get("environment") or {}
+            rows.append({
+                "device_guid": d.device_guid, "app_id": d.app_id, "platform": d.platform, "integrity_level": d.integrity,
+                "status": d.status, "key_version": d.key_version, "key_sha256": d.key_sha256[:16],
+                "enrolled_at_ms": int(d.enrolled_at * 1000),
+                "model": env.get("device_model"), "os": env.get("os"), "os_version": env.get("os_version"),
+                "owner_enrolled": bool(d.owner_key_sha256), "last_seen_ms": rec.get("time_ms"),
+                "customers": sorted(users.get(d.device_guid, ()))[:5],
+            })
         rows.sort(key=lambda r: -r["enrolled_at_ms"])
         return jsonify({"devices": rows})
 
@@ -550,6 +608,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
         from flask import current_app
         out = bo.erase_customer(user_id, current_app.fortguard_baselines)
         bo.x("DELETE FROM customers WHERE user_id=?", (user_id,))
+        bo.x("DELETE FROM usage WHERE user_id=?", (user_id,))
         bo.audit(user["username"], "customer_erase", f"customer:{user_id}", out)
         return jsonify({"user_id": user_id, "deleted": out})
 
@@ -579,12 +638,18 @@ def register(app, *, bo, api_key, registry, dev_mode):
                 g["devices"].add(rec["device_guid"])
             g["levels"][rec["risk_level"]] += 1
             g["max_risk"] = max(g["max_risk"], rec.get("risk_score") or 0)
+        for r in bo.q("SELECT user_id FROM usage"):
+            groups.setdefault(r["user_id"], {"user_id": r["user_id"], "sessions": 0, "last_ms": 0,
+                                             "devices": set(), "levels": Counter(), "max_risk": 0})
         rows = []
         for uid, g in groups.items():
             rows.append({"user_id": uid, "display_name": names.get(uid), "sessions": g["sessions"],
                          "devices": len(g["devices"]), "last_ms": g["last_ms"], "max_risk": g["max_risk"],
                          "levels": {k: g["levels"][k] for k in ("ALLOW", "STEP_UP", "BLOCK")},
-                         "owner": _owner_status(current_app.fortguard_baselines, uid)["status"]})
+                         "owner": _owner_status(current_app.fortguard_baselines, uid)["status"],
+                         "maturity": _maturity(_owner_status(current_app.fortguard_baselines, uid)),
+                         "display_name": names.get(uid),
+                         "active_ms": _usage_of(bo, uid)["active_ms"]})
         rows.sort(key=lambda r: -r["last_ms"])
         return jsonify({"customers": rows[:200]})
 
@@ -626,6 +691,9 @@ def register(app, *, bo, api_key, registry, dev_mode):
                           "risk_score": r["risk_score"], "action": r.get("action_recommended"),
                           "device_guid": r.get("device_guid")} for r in recs[:100]],
             "latest": recs[0] if recs else None,  # full numbers behind the newest decision
+            "usage": _usage_of(bo, user_id),
+            "maturity": _maturity(_owner_status(current_app.fortguard_baselines, user_id)),
+            "coverage": _coverage(recs[0] if recs else None),
         })
 
     @app.post("/v1/bo/customers/<user_id>/name")

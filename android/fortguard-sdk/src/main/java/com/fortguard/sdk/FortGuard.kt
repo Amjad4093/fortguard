@@ -94,6 +94,7 @@ object FortGuard {
         val checks = EnvironmentChecks(app).also { env = it }
         if (motion == null) motion = MotionCapture(app, buffer)
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        identityFields = storedIdentity(prefs)
         val guid = prefs.getString(KEY_GUID, null) ?: Ids.random("dev_", 12).also { prefs.edit().putString(KEY_GUID, it).apply() }
         timer?.cancel(false)
         worker.execute {
@@ -108,6 +109,7 @@ object FortGuard {
                     environment = { environmentSnapshot(checks) }, platform = "Android",
                     log = { m -> lastMessage = m; log(m) }, buffer = buffer,
                     ownerProof = { p -> OwnerKeys.proofFor(p) },
+                    identity = { identityFields },
                 )
                 engine!!.consentBehavioral = buffer.enabled // consent may have been set before the engine existed
                 lastMessage = "ready"
@@ -192,6 +194,27 @@ object FortGuard {
             LinkedHashMap(base).apply { debugOverrides.forEach { (k, v) -> if (containsKey(k)) put(k, v) } }
         } else base
     }
+
+    /**
+     * Says which customer is using this phone, so the back office can record their time in the app and show
+     * their name. Both values are checked here; nothing is sent until the next batch.
+     */
+    fun identify(context: Context, userId: String, customerName: String) {
+        val name = cleanName(customerName)
+        if (!CUSTOMER_ID.matches(userId) || name.isEmpty()) return
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("identity_user", userId).putString("identity_name", name).apply()
+        identityFields = mapOf("user_id" to userId, "customer_name" to name)
+    }
+
+    private fun storedIdentity(prefs: android.content.SharedPreferences): Map<String, String> {
+        val userId = prefs.getString("identity_user", null) ?: return emptyMap()
+        val name = prefs.getString("identity_name", null)?.let { cleanName(it) } ?: return emptyMap()
+        return if (CUSTOMER_ID.matches(userId) && name.isNotEmpty()) mapOf("user_id" to userId, "customer_name" to name)
+        else emptyMap()
+    }
+
+    private fun cleanName(raw: String): String = raw.filter { it.code >= 32 }.trim().take(80)
 
     /** Start capturing on a screen. Call from onResume. */
     fun attach(activity: Activity) {
@@ -284,5 +307,7 @@ object FortGuard {
     }
 
     private const val PREFS = "fortguard"
+    private val CUSTOMER_ID = Regex("[A-Za-z0-9_-]{1,64}")
+    @Volatile private var identityFields: Map<String, String> = emptyMap()
     private const val KEY_GUID = "device_guid"
 }

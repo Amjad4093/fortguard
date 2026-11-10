@@ -7,6 +7,7 @@
   "environment": {
     "active_call": true,
     "active_remote_software": false,
+    "device_model": "Pixel 7a",
     "has_hooking_framework": false,
     "is_emulator": false,
     "is_rooted": false,
@@ -99,7 +100,7 @@
   },
   "seq": 0,
   "session_id": "sess_8oyelwnme9o2",
-  "signature": "MEYCIQCpOX4SJrSq1xLC65MulDHSW6uHIwFxawsve7LDW9mO3wIhAJS6T6Aj08FLlXrIfZbDfyVWixHs4VDtDj_a8MCrkCrv",
+  "signature": "MEQCIDyTZzZPfaNEX0AbeJNwassJXuMyTNJW0dqFwFbrD3d8AiBNG0pEBbP3wd76TQczZLua11p2wurtNS5bnA6UbmyeHA",
   "timestamp_ms": 1799999940000,
   "touch_events": [
     {
@@ -157,5 +158,6 @@
       "field": "beneficiary_account",
       "ts": 1799999916314
     }
-  ]
+  ],
+  "user_id": "usr_i92bjh90"
 }

@@ -105,6 +105,10 @@ def _sensors(rng, start_ms, seconds, human):
     return {"accelerometer": accel, "gyroscope": gyro}
 
 
+# Phone models for the synthetic devices, so the back office has real-looking model names to show.
+DEVICE_MODELS = ("Pixel 8", "SM-S921B", "Pixel 7a", "SM-A546E", "Redmi Note 13")
+
+
 def _env(**flags):
     env = {"os": "Android", "os_version": "15.0", "is_rooted": False, "is_emulator": False,
            "has_hooking_framework": False, "active_remote_software": False,
@@ -131,6 +135,7 @@ def build_session(scenario, now_ms, seed=0, device=None):
                          "remote_control")
 
     env = _env()
+    env["device_model"] = DEVICE_MODELS[sum(map(ord, device.device_guid)) % len(DEVICE_MODELS)]
     if scenario == "emulator_bot":
         env.update(is_emulator=True)
     if scenario == "remote_control":
@@ -176,7 +181,7 @@ def build_session(scenario, now_ms, seed=0, device=None):
             "app_id": device.app_id, "timestamp_ms": int(now_ms - 60_000 + index * 20_000),
             "nonce": _ident(rng, "n_", 16), "seq": index, "consent": consent, "environment": env,
             "touch_events": touch_part, "key_events": key_part, "ui_events": ui_part,
-            "sensor_data": sensor_part,
+            "sensor_data": sensor_part, "user_id": user_id,
         }
         batches.append(device.sign(payload))
 

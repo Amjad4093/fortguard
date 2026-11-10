@@ -43,6 +43,7 @@ class MainActivity : Activity() {
         /** Test account, built into the demo only. Not a real customer login. */
         const val DEMO_USER = "demo"
         const val DEMO_PASSWORD = "FortGuard@2026"
+        const val DEMO_NAME = "Demo Customer"
         const val DEMO_BALANCE = "PKR 245,300.00"
         const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
 
@@ -72,6 +73,7 @@ class MainActivity : Activity() {
     private val signalValues = HashMap<String, TextView>()
 
     private var loginView: View? = null
+    private lateinit var loginName: EditText
     private lateinit var loginUser: EditText
     private lateinit var loginPassword: EditText
     private lateinit var loginError: TextView
@@ -207,13 +209,16 @@ class MainActivity : Activity() {
             .apply { setPadding(0, 0, 0, dp(12)) })
 
         val box = card()
+        loginName = input("Full name", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_CAP_WORDS)
         loginUser = input("Username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         loginPassword = input("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         // Pre-filled for testers. Set before FortGuard watches the fields, so the fill is not recorded as typing.
+        loginName.setText(DEMO_NAME)
         loginUser.setText(DEMO_USER)
         loginPassword.setText(DEMO_PASSWORD)
         FortGuard.watch(loginUser, Field.USERNAME)
         FortGuard.watch(loginPassword, Field.PASSWORD)
+        box.addView(label("Full name")); box.addView(loginName)
         box.addView(label("Username")); box.addView(loginUser)
         box.addView(label("Password")); box.addView(loginPassword)
         loginError = text("", 13f, DANGER).apply { setPadding(0, dp(8), 0, 0) }
@@ -231,11 +236,18 @@ class MainActivity : Activity() {
     }
 
     private fun signIn() {
+        val name = loginName.text.toString().trim()
+        if (name.isEmpty()) {
+            loginError.text = "Enter your full name."
+            return
+        }
         val ok = loginUser.text.toString().trim() == DEMO_USER && loginPassword.text.toString() == DEMO_PASSWORD
         if (!ok) {
             loginError.text = "Wrong username or password."
             return
         }
+        // Tells FortGuard which customer is using this phone, so their time in the app and name reach the back office.
+        FortGuard.identify(this, userId(), name)
         loggedIn = true
         loginPassword.setText("")
         loginError.text = ""

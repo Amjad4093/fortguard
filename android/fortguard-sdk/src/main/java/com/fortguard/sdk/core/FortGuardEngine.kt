@@ -21,6 +21,8 @@ class FortGuardEngine(
     val buffer: EventBuffer = EventBuffer(),
     /** Returns the owner proof for a batch, or null when no owner window is open. Set by the Android layer. */
     private val ownerProof: ((Map<String, Any?>) -> Map<String, Any?>?)? = null,
+    /** The customer this phone is used by (user_id, customer_name), when the app has identified them. */
+    private val identity: (() -> Map<String, String>)? = null,
 ) {
     @Volatile var consentBehavioral: Boolean = true
         set(value) { field = value; buffer.enabled = value; if (!value) buffer.clear() }
@@ -111,6 +113,7 @@ class FortGuardEngine(
             },
         )
         ownerProof?.invoke(payload)?.let { payload["owner_proof"] = it }
+        identity?.invoke()?.forEach { (k, v) -> payload[k] = v }
         val signed = TelemetrySigning.sign(payload, key)
         val body = CanonicalJson.encode(signed)
         lastBatchJson = body

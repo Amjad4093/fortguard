@@ -17,7 +17,7 @@ CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 
 TOP_ALLOWED = {
     "session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "seq", "consent",
-    "environment", "touch_events", "key_events", "ui_events", "sensor_data", "signature", "owner_proof",
+    "environment", "touch_events", "key_events", "ui_events", "sensor_data", "signature", "owner_proof", "user_id", "customer_name",
 }
 TOP_REQUIRED = ("session_id", "device_guid", "app_id", "timestamp_ms", "nonce", "environment")
 
@@ -34,6 +34,7 @@ ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "free_storage_mb": (0, 10_000_000, True),
 }
 DEVICE_MODEL_RE = re.compile(r"^[A-Za-z0-9 _\-.()/+]{1,80}$")  # e.g. "Pixel 8", "SM-S921B"
+CUSTOMER_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
 TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
 ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone"}
@@ -115,6 +116,13 @@ def validate_telemetry(p):
     if "behavioral" in consent and not isinstance(consent["behavioral"], bool):
         _fail("invalid_request", "consent.behavioral must be true or false")
 
+    if "user_id" in p:  # optional: the customer id the app uses, so usage can be recorded per customer
+        if not isinstance(p["user_id"], str) or not CUSTOMER_ID_RE.fullmatch(p["user_id"]):
+            _fail("invalid_request", "user_id must be 1-64 letters, digits, _ or -")
+    if "customer_name" in p:  # optional: the customer's name, as typed in the app
+        name = p["customer_name"]
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80 or any(ord(c) < 32 for c in name):
+            _fail("invalid_request", "customer_name must be plain text, 1-80 characters")
     if "owner_proof" in p:  # optional: a batch recorded during an owner enrolment window
         proof = p["owner_proof"]
         if not isinstance(proof, dict) or set(proof) != {"public_key", "signature"} or not all(

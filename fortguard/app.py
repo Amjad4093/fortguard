@@ -66,6 +66,15 @@ def _start_purge_job(bo, baselines):
     threading.Thread(target=loop, name="fortguard-purge", daemon=True).start()
 
 
+def _batch_span_ms(payload):
+    """Time from the first to the last reading in one batch: the time in the app that the batch covers."""
+    times = [e["timestamp_ms"] for e in payload.get("touch_events", [])]
+    times += [e["ts"] for e in payload.get("key_events", [])] + [e["ts"] for e in payload.get("ui_events", [])]
+    for samples in (payload.get("sensor_data") or {}).values():
+        times += [s["ts"] for s in samples]
+    return max(times) - min(times) if times else 0
+
+
 def create_app(api_key=None, clock=time.time, store=None, registry=None, verifier=None,
                allowed_app_ids=None, dev_mode=None, db_path=None, admin_password=None,
                start_jobs=False):
@@ -223,6 +232,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
             return _error(409, "replay_detected", "this nonce was already used for the session")
         except DeviceMismatch:
             return _error(409, "device_mismatch", "session belongs to a different device")
+        if payload.get("user_id"):  # the customer using the app, when the app says who it is
+            bo.note_activity(payload["user_id"], _batch_span_ms(payload), payload.get("customer_name"))
         return jsonify({"session_id": payload["session_id"], "accepted": kept}), 202
 
     @app.post("/v1/risk/evaluate")
