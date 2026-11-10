@@ -1,6 +1,7 @@
 name: ios
+# Manual only for now: macOS minutes cost ten times Linux minutes on a private repo.
+# Run it from the Actions tab (Run workflow) when iOS work resumes.
 on:
-  push:
   workflow_dispatch:
 
 permissions:
