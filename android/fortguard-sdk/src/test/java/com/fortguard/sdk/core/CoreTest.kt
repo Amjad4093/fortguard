@@ -95,6 +95,18 @@ class CoreTest {
         repeat(200) { assertTrue(Ids.random("sess_", 16).matches(Regex("^[A-Za-z0-9_\\-]{8,64}$"))) }
     }
 
+    @Test fun ownerProofCoversTheCustomerIdentity() {
+        val payload = linkedMapOf<String, Any?>("session_id" to "sess_abcdefgh", "seq" to 1)
+        var seenByProof: Set<String> = emptySet()
+        FortGuardEngine.addIdentityThenProof(
+            payload,
+            identity = { mapOf("user_id" to "usr_1", "customer_name" to "Demo Customer") },
+            ownerProof = { p -> seenByProof = p.keys.toSet(); mapOf("signature" to "x") },
+        )
+        assertEquals(setOf("session_id", "seq", "user_id", "customer_name"), seenByProof)
+        assertEquals(payload.keys - "owner_proof", seenByProof)
+    }
+
     // --- Event buffer --------------------------------------------------------------------------------------
 
     @Test fun keyEventsCarryOnlyTypeTimeAndField() {

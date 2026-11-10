@@ -112,11 +112,25 @@ class FortGuardEngine(
                 put("gyroscope", d.gyro)
             },
         )
-        ownerProof?.invoke(payload)?.let { payload["owner_proof"] = it }
-        identity?.invoke()?.forEach { (k, v) -> payload[k] = v }
+        addIdentityThenProof(payload, identity, ownerProof)
         val signed = TelemetrySigning.sign(payload, key)
         val body = CanonicalJson.encode(signed)
         lastBatchJson = body
         return api.post("/v1/telemetry/stream", body)
+    }
+
+    companion object {
+        /**
+         * Identity goes in first. The owner proof covers every field except itself and the device signature,
+         * so anything added after the proof makes the server refuse the batch (bad_owner_proof).
+         */
+        internal fun addIdentityThenProof(
+            payload: MutableMap<String, Any?>,
+            identity: (() -> Map<String, String>)?,
+            ownerProof: ((Map<String, Any?>) -> Map<String, Any?>?)?,
+        ) {
+            identity?.invoke()?.forEach { (k, v) -> payload[k] = v }
+            ownerProof?.invoke(payload)?.let { payload["owner_proof"] = it }
+        }
     }
 }
