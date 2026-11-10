@@ -27,6 +27,14 @@ class JcaDeviceKey(private val privateKey: PrivateKey, publicKey: PublicKey) : D
         }
 }
 
+/** The owner key signs only this: the batch body without its own signatures. Matches the server. */
+object OwnerSigning {
+    const val CONTEXT = "fortguard.owner-proof.v1\n"
+
+    fun signingBytes(payload: Map<String, Any?>): ByteArray =
+        (CONTEXT + CanonicalJson.encode(payload.filterKeys { it != "signature" && it != "owner_proof" })).toByteArray(Charsets.UTF_8)
+}
+
 object TelemetrySigning {
     /** Domain separation, must match the server's TELEMETRY_CONTEXT. */
     const val CONTEXT = "fortguard.telemetry.v1\n"

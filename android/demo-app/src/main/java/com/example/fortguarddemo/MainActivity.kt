@@ -81,6 +81,7 @@ class MainActivity : Activity() {
     private lateinit var serverInput: EditText
     private lateinit var apiKeyInput: EditText
     private lateinit var consent: CheckBox
+    private lateinit var ownerStatus: TextView
     private lateinit var statusText: TextView
     private lateinit var accountInput: EditText
     private lateinit var amountInput: EditText
@@ -342,6 +343,12 @@ class MainActivity : Activity() {
         return scroll(col)
     }
 
+    private fun ownerLine(): String {
+        val left = FortGuard.ownerWindowLeftS()
+        return if (left > 0) "Owner confirmed. Window open for ${left / 60} min ${left % 60} s."
+        else "Not confirmed. Batches are sent without owner proof."
+    }
+
     private fun buildSettings(): View {
         val col = column()
         col.addView(text("Settings", 22f, INK, bold = true).apply { setPadding(0, 0, 0, dp(12)) })
@@ -397,9 +404,36 @@ class MainActivity : Activity() {
         ), lp(top = 6))
         col.addView(device, lp(bottom = 12))
 
+        val owner = card()
+        owner.addView(text("Owner of this phone", 15f, INK, bold = true))
+        owner.addView(text("Confirm with your fingerprint or face. For the next 10 minutes, batches carry proof that you confirmed, and FortGuard learns how you use the app. The app never sees your fingerprint.", 12f, MUTED))
+        ownerStatus = text(ownerLine(), 13f, INK).apply { setPadding(0, dp(8), 0, 0) }
+        owner.addView(ownerStatus)
+        owner.addView(primaryButton("Confirm I am the owner") {
+            FortGuard.enrolOwner(this@MainActivity) { ok, message ->
+                toast(message)
+                ownerStatus.text = ownerLine()
+            }
+        }, lp(top = 10))
+        owner.addView(CheckBox(this).apply {
+            text = "Keep motion checks running after I close the app"
+            isChecked = prefs.getBoolean("background_motion", false)
+            setTextColor(INK)
+            setOnCheckedChangeListener { _, on ->
+                if (on && android.os.Build.VERSION.SDK_INT >= 33) {
+                    requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
+                }
+                prefs.edit().putBoolean("background_motion", on).apply()
+                FortGuard.setBackgroundMotion(this@MainActivity, on)
+            }
+        }, lp(top = 12))
+        owner.addView(text("A notification shows while this is on. Touch and typing are still captured only inside the app.", 12f, MUTED).apply { setPadding(0, dp(4), 0, 0) })
+        col.addView(owner, lp(bottom = 12))
+
         val forced = card()
-        forced.addView(text("Force conditions (testing only)", 15f, INK, bold = true))
-        forced.addView(text("The SDK detects these itself. Ticking a box forces the server to see it, to test its rules.", 12f, MUTED))
+        forced.addView(text("Conditions (testing)", 15f, INK, bold = true))
+        forced.addView(text("Auto lets the SDK decide from the phone. On or Off forces the server to see that value, to test its rules.", 12f, MUTED))
+        val modes = listOf("Auto", "On", "Off")
         listOf(
             "active_call" to "On a call",
             "screen_sharing" to "Screen sharing",
@@ -407,10 +441,22 @@ class MainActivity : Activity() {
             "is_rooted" to "Rooted",
             "vpn" to "VPN",
         ).forEach { (key, caption) ->
-            forced.addView(CheckBox(this).apply {
-                this.text = caption
-                setTextColor(INK)
-                setOnCheckedChangeListener { _, on -> if (on) FortGuard.debugOverrides[key] = true else FortGuard.debugOverrides.remove(key) }
+            val detected = FortGuard.status().environment[key]
+            val reading = when (detected) { true -> "detected yes"; false -> "detected no"; else -> "not read yet" }
+            forced.addView(text("$caption  ·  $reading", 13f, INK), lp(top = 10))
+            forced.addView(Spinner(this).apply {
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, modes)
+                setSelection(when (FortGuard.debugOverrides[key]) { true -> 1; false -> 2; else -> 0 })
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        when (position) {
+                            1 -> FortGuard.debugOverrides[key] = true
+                            2 -> FortGuard.debugOverrides[key] = false
+                            else -> FortGuard.debugOverrides.remove(key)
+                        }
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                }
             })
         }
         col.addView(forced, lp(bottom = 12))

@@ -55,6 +55,11 @@ internal class EnvironmentChecks(context: Context) {
     private fun deviceFacts(): Map<String, Any?> {
         val out = LinkedHashMap<String, Any?>()
         runCatching {
+            val model = android.os.Build.MODEL.orEmpty()
+                .filter { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it in " _-.()/+" }.trim().take(80)
+            if (model.isNotEmpty()) out["device_model"] = model
+        }
+        runCatching {
             val battery = app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
             val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1

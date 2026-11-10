@@ -107,6 +107,7 @@ object FortGuard {
                     api = api, appId = config.appId, deviceGuid = guid, key = key, attestation = attestation,
                     environment = { environmentSnapshot(checks) }, platform = "Android",
                     log = { m -> lastMessage = m; log(m) }, buffer = buffer,
+                    ownerProof = { p -> OwnerKeys.proofFor(p) },
                 )
                 engine!!.consentBehavioral = buffer.enabled // consent may have been set before the engine existed
                 lastMessage = "ready"
@@ -121,10 +122,69 @@ object FortGuard {
         timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
     }
 
+    @Volatile private var ownerWindowUntilMs = 0L
+    @Volatile private var motionServiceRunning = false
+
+    /**
+     * Asks the owner to confirm with a fingerprint or face. A confirmation opens a window of
+     * OwnerKeys.WINDOW_S seconds, during which every batch carries a proof that only this phone's owner
+     * could have made. Needs Android 11 or later and a fingerprint or face enrolled on the phone.
+     */
+    fun enrolOwner(activity: Activity, onResult: (Boolean, String) -> Unit) {
+        if (!OwnerKeys.supported) return onResult(false, "Owner confirmation needs Android 11 or later.")
+        val biometrics = activity.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
+        if (biometrics.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+            != android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS) {
+            return onResult(false, "Set up a fingerprint or face unlock on this phone first.")
+        }
+        try {
+            OwnerKeys.create()
+        } catch (e: Exception) {
+            return onResult(false, "Could not create the owner key: ${e.message}")
+        }
+        val prompt = android.hardware.biometrics.BiometricPrompt.Builder(activity)
+            .setTitle("Confirm it's you")
+            .setSubtitle("FortGuard learns how this phone is usually used")
+            .setNegativeButtonText("Cancel")
+            .build()
+        prompt.authenticate(android.os.CancellationSignal(), activity.mainExecutor,
+            object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult) {
+                    ownerWindowUntilMs = System.currentTimeMillis() + OwnerKeys.WINDOW_S * 1000L
+                    onResult(true, "Confirmed. Use the app normally for the next ${OwnerKeys.WINDOW_S / 60} minutes.")
+                }
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    onResult(false, errString.toString())
+                }
+            })
+    }
+
+    /** Seconds left in the owner window that this app session opened, 0 when closed or unknown. */
+    fun ownerWindowLeftS(): Long = ((ownerWindowUntilMs - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)
+
+    /**
+     * Keeps motion checks running after the screens close, with a visible notification. Off by default.
+     * Only starts when the customer has consented to behavioural capture.
+     */
+    fun setBackgroundMotion(context: Context, on: Boolean) {
+        val app = context.applicationContext
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("background_motion", on).apply()
+        val intent = android.content.Intent(app, FortGuardMotionService::class.java)
+        if (on && buffer.enabled) app.startForegroundService(intent) else if (!on) app.stopService(intent)
+    }
+
+    /** True once init has run in this process. The motion service uses it to stop itself after a restart. */
+    fun isStarted(): Boolean = motion != null
+
+    internal fun motionServiceChanged(running: Boolean) {
+        motionServiceRunning = running
+        if (running) motion?.start() else if (attached.isEmpty()) motion?.stop()
+    }
+
     private fun environmentSnapshot(checks: EnvironmentChecks): Map<String, Any?> {
         val base = checks.snapshot()
         return if (config?.allowDebugOverrides == true && debugOverrides.isNotEmpty()) {
-            LinkedHashMap(base).apply { debugOverrides.forEach { (k, v) -> if (containsKey(k)) put(k, v || (get(k) == true)) } }
+            LinkedHashMap(base).apply { debugOverrides.forEach { (k, v) -> if (containsKey(k)) put(k, v) } }
         } else base
     }
 
@@ -143,7 +203,7 @@ object FortGuard {
     fun detach(activity: Activity) {
         attached.remove(activity)?.let { cb -> if (activity.window.callback === cb) activity.window.callback = cb.base }
         env?.onDetach(activity)
-        if (attached.isEmpty()) motion?.stop()
+        if (attached.isEmpty() && !motionServiceRunning) motion?.stop()
         flush()
     }
 
@@ -192,6 +252,8 @@ object FortGuard {
         timer?.cancel(false)
         engine = null
         AndroidKeys.delete()
+        OwnerKeys.delete()
+        ownerWindowUntilMs = 0L
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_GUID).apply()
         buffer.clear()
         lastMessage = "device reset"
