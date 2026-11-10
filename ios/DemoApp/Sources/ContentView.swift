@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("fgServer") private var server = "http://192.168.1.100:8080"
     @AppStorage("fgApiKey") private var apiKey = "dev-only-api-key"
     @AppStorage("fgUser") private var userId = "usr_" + String(UUID().uuidString.prefix(8)).lowercased()
+    @AppStorage("fgName") private var customerName = "Demo Customer"
     @State private var level = "STRONG"
     @State private var consent = true
     @State private var forced: Set<String> = []
@@ -32,6 +33,9 @@ struct ContentView: View {
             ScrollViewReader { proxy in
             Form {
                 Section(footer: Text("Test app for the FortGuard SDK. Attestation is simulated by a server running with --dev. Typed text never leaves the phone: only edit timing and the field name.")) {
+                    TextField("Your full name", text: $customerName)
+                        .onChange(of: customerName) { FortGuard.shared.identify(userId: userId, customerName: $0) }
+                        .onAppear { FortGuard.shared.identify(userId: userId, customerName: customerName) }
                     TextField("Server address", text: $server)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("API key (plays the bank's server)", text: $apiKey)

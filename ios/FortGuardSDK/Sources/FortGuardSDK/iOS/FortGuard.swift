@@ -97,6 +97,7 @@ public final class FortGuard {
                                              environment: { [weak self] in self?.environmentSnapshot(checks) ?? checks.snapshot() },
                                              platform: "iOS", log: { [weak self] m in self?.lastMessage = m; log(m) }, buffer: self.buffer)
                 engine.consentBehavioral = self.buffer.enabled
+                engine.identity = FortGuard.storedIdentity()
                 self.engine = engine
                 let outcome = engine.enroll()
                 self.lastMessage = outcome.message
@@ -122,6 +123,38 @@ public final class FortGuard {
     }
 
     /// Test apps only (needs allowDebugOverrides): force an environment flag on.
+    /// Says which customer is using this phone, so the back office can record their time in the app and show
+    /// their name. Values that fail the checks are ignored; the identity is sent with each later batch.
+    public func identify(userId: String, customerName: String) {
+        let name = FortGuard.cleanName(customerName)
+        guard FortGuard.isValidCustomerId(userId), !name.isEmpty else { return }
+        UserDefaults.standard.set(userId, forKey: FortGuard.identityUserKey)
+        UserDefaults.standard.set(name, forKey: FortGuard.identityNameKey)
+        let fields = ["user_id": userId, "customer_name": name]
+        queue.async { [weak self] in self?.engine?.identity = fields }
+    }
+
+    static let identityUserKey = "fortguard.identity_user"
+    static let identityNameKey = "fortguard.identity_name"
+
+    static func isValidCustomerId(_ userId: String) -> Bool {
+        (1...64).contains(userId.count) && userId.allSatisfy { ch in
+            ch.isASCII && (ch.isLetter || ch.isNumber || ch == "_" || ch == "-")
+        }
+    }
+
+    static func cleanName(_ raw: String) -> String {
+        let printable = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.value >= 32 }))
+        return String(printable.trimmingCharacters(in: .whitespaces).prefix(80))
+    }
+
+    static func storedIdentity() -> [String: String] {
+        let d = UserDefaults.standard
+        guard let user = d.string(forKey: identityUserKey), let name = d.string(forKey: identityNameKey),
+              isValidCustomerId(user), !cleanName(name).isEmpty else { return [:] }
+        return ["user_id": user, "customer_name": cleanName(name)]
+    }
+
     public func setDebugOverride(_ key: String, _ on: Bool) {
         lock.lock(); overrides[key] = on; lock.unlock()
     }

@@ -204,8 +204,11 @@ public final class FortGuardEngine {
         return Outcome(ok: r.status == 202, message: r.describe(), response: r)
     }
 
+    /// The customer using this phone (user_id, customer_name), when the app has identified them.
+    public var identity: [String: String] = [:]
+
     private func send(_ d: EventBuffer.Drained) -> ApiClient.Response {
-        let payload: [String: JSON] = [
+        var payload: [String: JSON] = [
             "session_id": .string(sessionId),
             "device_guid": .string(deviceGuid),
             "app_id": .string(appId),
@@ -219,6 +222,7 @@ public final class FortGuardEngine {
             "ui_events": .array(d.ui),
             "sensor_data": .object(["accelerometer": .array(d.accel), "gyroscope": .array(d.gyro)]),
         ]
+        for (k, v) in identity { payload[k] = .string(v) }
         seq += 1
         do {
             let signed = try TelemetrySigning.sign(payload, key: key)
