@@ -208,6 +208,14 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
 .namebox { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .namebox input { min-width: 240px; }
 .mono { font-family: var(--mono); font-size: .8rem; }
+/* page polish */
+.pagehead-text { min-width: 0; margin-right: auto; }
+.pagesub { margin: 6px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.5; max-width: 62ch; }
+tbody tr:hover td { background: var(--hover); }
+tr.link { cursor: pointer; }
+.me { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; font: 700 .72rem/1 var(--sans); letter-spacing: .02em; flex: none; }
+.strip-note { font-size: .8rem; color: var(--muted); margin: -6px 0 14px; }
 </style>
 </head>
 <body>
@@ -248,7 +256,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     <a href="#/users" data-page="users" class="admin-only">Users</a>
     <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
     <div class="spacer"></div>
-    <div class="who"><span id="who"></span><button type="button" id="logout">Sign out</button></div>
+    <div class="who"><span class="me"><i class="avatar" id="avatar" aria-hidden="true"></i><span id="who"></span></span><button type="button" id="logout">Sign out</button></div>
   </nav>
   <main>
     <div class="banner hidden" id="dev-banner">Test server: attestation is simulated and data is synthetic. Not for real customers.</div>
@@ -331,6 +339,7 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     try { var me = await call("GET", "/v1/auth/me"); } catch (e) { return signOut(true); }
     S.user = me.user; S.dev = me.dev_mode;
     $("who").textContent = S.user.username + " · " + S.user.role;
+    $("avatar").textContent = S.user.username.slice(0, 2).toUpperCase();
     document.querySelectorAll(".admin-only").forEach(function (a) { a.classList.toggle("hidden", !can("admin")); });
     $("dev-banner").classList.toggle("hidden", !S.dev);
     $("login").classList.add("hidden"); $("app").classList.remove("hidden");
@@ -356,7 +365,21 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
-  function head(v, title, extra) { v.appendChild(el("div", { class: "pagehead" }, [el("h1", { text: title })].concat(extra || []))); }
+  var PAGE_SUB = {
+    "Dashboard": "What is happening across all sessions in the last 24 hours.",
+    "Cases": "Sessions that need a person to look at them. Open a case to see the evidence.",
+    "Customers": "Everything FortGuard has seen for one customer id, across devices and sessions.",
+    "Decisions": "Every decision, newest first. Numbers only, never typed text.",
+    "Devices": "Phones that have enrolled with FortGuard. Revoke a device to stop it sending data.",
+    "Rules": "Points for each signal, and the score bands that decide allow, step-up and block.",
+    "Users": "Who can sign in to this back office, and what each role may do.",
+    "Audit log": "A record of every change and sign-in. Entries cannot be edited."
+  };
+  function head(v, title, extra) {
+    var text = [el("h1", { text: title })];
+    if (PAGE_SUB[title]) text.push(el("p", { class: "pagesub", text: PAGE_SUB[title] }));
+    v.appendChild(el("div", { class: "pagehead" }, [el("div", { class: "pagehead-text" }, text)].concat(extra || [])));
+  }
 
   // --- dashboard -------------------------------------------------------------------------------------
   async function dashboard(v) {
@@ -576,6 +599,10 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
   async function customers(v) {
     head(v, "Customers");
     var data = await call("GET", "/v1/bo/customers");
+    v.appendChild(el("div", { class: "tiles" }, [tile(data.customers.length, "Customers seen"),
+      tile(data.customers.filter(function (c) { return c.owner === "MATURE"; }).length, "With a ready profile"),
+      tile(data.customers.filter(function (c) { return c.levels.BLOCK > 0; }).length, "Had a blocked session"),
+      tile(data.customers.reduce(function (n, c) { return n + c.sessions; }, 0), "Sessions in total")]));
     var rows = data.customers.map(function (c) {
       var levels = c.levels.BLOCK + " block · " + c.levels.STEP_UP + " step-up · " + c.levels.ALLOW + " allow";
       return el("tr", { class: "link", onclick: function () { location.hash = "#/customers/" + encodeURIComponent(c.user_id); } }, [
@@ -724,6 +751,10 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
     });
     v.appendChild(el("div", { class: "toolbar" }, [chips]));
     var data = await call("GET", "/v1/bo/decisions?limit=300" + (decisionLevel ? "&level=" + decisionLevel : ""));
+    var counts = { ALLOW: 0, STEP_UP: 0, BLOCK: 0 };
+    data.decisions.forEach(function (d) { counts[d.risk_level] = (counts[d.risk_level] || 0) + 1; });
+    v.appendChild(el("div", { class: "tiles" }, [tile(data.decisions.length, "Shown"), tile(counts.ALLOW, "Allowed"),
+      tile(counts.STEP_UP, "Stepped up"), tile(counts.BLOCK, "Blocked")]));
     var rows = data.decisions.map(function (d) {
       return el("tr", {}, [el("td", { text: when(d.time_ms) }), el("td", { text: short(d.session_id, 16) }), el("td", { text: d.user_id }), el("td", { text: d.event_type.replace(/_/g, " ").toLowerCase() }),
         el("td", { text: money(d.amount, d.currency) }), el("td", { text: String(d.risk_score) }), el("td", {}, [pill(d.risk_level)]),
@@ -737,6 +768,9 @@ table.plain tr + tr td { border-top: 1px solid var(--rule); }
   async function devices(v) {
     head(v, "Devices");
     var data = await call("GET", "/v1/bo/devices");
+    var active = data.devices.filter(function (d) { return d.status === "ACTIVE"; }).length;
+    v.appendChild(el("div", { class: "tiles" }, [tile(data.devices.length, "Enrolled devices"), tile(active, "Active"),
+      tile(data.devices.length - active, "Revoked"), tile(data.devices.filter(function (d) { return d.integrity_level === "STRONG"; }).length, "Strong attestation")]));
     var rows = data.devices.map(function (d) {
       var action = can("analyst") && d.status === "ACTIVE" ? el("button", { class: "danger", type: "button", text: "Revoke", onclick: async function () {
         if (!confirm("Revoke " + d.device_guid + "?")) return;
