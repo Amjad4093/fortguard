@@ -203,10 +203,15 @@ class MainActivity : Activity() {
         }
         col.addView(text("FortGuard", 28f, PRIMARY, bold = true))
         col.addView(text("Sign in to your account", 15f, MUTED).apply { setPadding(0, dp(2), 0, dp(20)) })
+        col.addView(text("Version ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_DATE}", 12f, MUTED)
+            .apply { setPadding(0, 0, 0, dp(12)) })
 
         val box = card()
         loginUser = input("Username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         loginPassword = input("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        // Pre-filled for testers. Set before FortGuard watches the fields, so the fill is not recorded as typing.
+        loginUser.setText(DEMO_USER)
+        loginPassword.setText(DEMO_PASSWORD)
         FortGuard.watch(loginUser, Field.USERNAME)
         FortGuard.watch(loginPassword, Field.PASSWORD)
         box.addView(label("Username")); box.addView(loginUser)
@@ -564,7 +569,11 @@ class MainActivity : Activity() {
     /** The value to show for one signal, and whether it is active right now. */
     private fun valueFor(name: String, s: FortGuard.Status): Pair<String, Boolean> {
         s.signals[name]?.let { n -> if (n > 0) return "$n captured" to true }
-        if (name in s.sensorsAvailable) return "ready, waiting for data" to false
+        if (name in s.sensorsAvailable) {
+            // These report only when the reading changes, so silence is normal until the phone moves or the light changes.
+            if (name in listOf("light", "proximity", "pressure")) return "on this phone, reports when it changes" to false
+            return "ready, waiting for data" to false
+        }
         if (name in listOf("accelerometer", "gyroscope", "magnetometer", "gravity", "linear_acceleration",
                 "rotation_vector", "light", "proximity", "pressure")) return "not on this phone" to false
         if (name in listOf("touch", "keystrokes", "ui_events")) return "waiting for input" to false

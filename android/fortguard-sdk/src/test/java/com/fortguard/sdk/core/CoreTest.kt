@@ -114,6 +114,15 @@ class CoreTest {
         assertEquals(2, b.counts().dropped)
     }
 
+    @Test fun motionFloodDoesNotCrowdOutOtherSensors() {
+        val b = EventBuffer(maxSensor = 5, maxExtraSensor = 5)
+        repeat(50) { b.accel(0.0, 9.8, 0.0, 1000L + it) }
+        b.sensor("magnetometer", 20.0, 0.0, 0.0, 2000)
+        b.sensor("light", 300.0, 0.0, 0.0, 2001)
+        val d = b.drain()
+        assertEquals(setOf("magnetometer", "light"), d.extra.keys)
+    }
+
     @Test fun noConsentMeansNothingIsKept() {
         val b = EventBuffer()
         b.enabled = false

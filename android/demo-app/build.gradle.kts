@@ -1,3 +1,4 @@
+import java.time.LocalDate
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -16,6 +17,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1-demo"
+        // The build date shown on the login screen, set when this APK is built.
+        buildConfigField("String", "BUILD_DATE", "\"${LocalDate.now()}\"")
+    }
+    buildFeatures {
+        buildConfig = true
     }
     buildTypes {
         debug {

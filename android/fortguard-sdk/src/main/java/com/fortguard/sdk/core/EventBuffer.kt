@@ -23,6 +23,7 @@ class EventBuffer(
     private val maxKeys: Int = 1500,
     private val maxUi: Int = 400,
     private val maxSensor: Int = 4000,
+    private val maxExtraSensor: Int = 4000,
 ) {
     private val touch = ArrayList<Map<String, Any?>>()
     private val keys = ArrayList<Map<String, Any?>>()
@@ -30,7 +31,9 @@ class EventBuffer(
     private val accel = ArrayList<Map<String, Any?>>()
     private val gyro = ArrayList<Map<String, Any?>>()
     private val extra = LinkedHashMap<String, ArrayList<Map<String, Any?>>>()
-    private var totals = IntArray(4)
+    // Slots: 0 touch, 1 keys, 2 ui, 3 accelerometer and gyroscope, 4 the other sensors.
+    // The other sensors have their own budget, so motion samples can never crowd them out.
+    private var totals = IntArray(5)
     private var dropped = 0
 
     // Lifetime figures for the on-screen panel. They are not cleared when a batch is sent.
@@ -90,14 +93,14 @@ class EventBuffer(
 
     fun gyro(x: Double, y: Double, z: Double, ts: Long) = add(gyro, maxSensor, sample(x, y, z, ts), 3, "gyroscope")
 
-    /** Any other sensor, by its wire name (for example "magnetometer"). Shares the sensor cap. */
+    /** Any other sensor, by its wire name (for example "magnetometer"). Has its own budget, slot 4. */
     fun sensor(name: String, x: Double, y: Double, z: Double, ts: Long) {
         if (!enabled) return
         synchronized(this) {
             val list = extra.getOrPut(name) { ArrayList() }
-            if (totals[3] >= maxSensor) { dropped++; return }
+            if (totals[4] >= maxExtraSensor) { dropped++; return }
             list.add(sample(x, y, z, ts))
-            totals[3]++
+            totals[4]++
             bump(name)
         }
     }
@@ -128,11 +131,11 @@ class EventBuffer(
 
     fun clear() = synchronized(this) {
         touch.clear(); keys.clear(); ui.clear(); accel.clear(); gyro.clear(); extra.clear()
-        totals = IntArray(4); dropped = 0
+        totals = IntArray(5); dropped = 0
         seen.clear(); typedChars = 0L; correctedChars = 0L
     }
 
-    fun counts(): Counts = synchronized(this) { Counts(totals[0], totals[1], totals[2], totals[3], dropped) }
+    fun counts(): Counts = synchronized(this) { Counts(totals[0], totals[1], totals[2], totals[3] + totals[4], dropped) }
 
     /** Lifetime number of samples or events seen per signal name, for the on-screen panel. */
     fun signals(): Map<String, Long> = synchronized(this) { LinkedHashMap(seen) }

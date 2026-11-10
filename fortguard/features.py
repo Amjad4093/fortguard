@@ -166,15 +166,15 @@ def tremor_band_ratio(accel):
     return float(band / total)
 
 
-def hesitation_index(touch, keys, ui):
-    """0 to 1. Total time spent in pauses longer than 3 s between inputs, capped per pause.
+def hesitation_index(keys, ui):
+    """0 to 1. Total time spent in pauses longer than 3 s between form inputs, capped per pause.
 
-    Session-wide for now: a person reading a screen also pauses. Narrowing this to the payment
-    flow is a sprint 2 item.
+    Form inputs are keystrokes, field focus and submit. Taps that open screens, scrolling and other
+    touches are not counted: time spent reading a screen is not hesitation over the payment.
+    Continuous typing never leaves a gap this long, however fast it is.
     """
     times = sorted(
-        [e["timestamp_ms"] for e in touch if e["event_type"] == "DOWN"]
-        + [e["ts"] for e in keys if e["event_type"] == "DOWN"]
+        [e["ts"] for e in keys if e["event_type"] == "DOWN"]
         + [e["ts"] for e in ui]
     )
     paused = 0.0
@@ -226,7 +226,7 @@ def compute_features_full(session):
         "ft_tremor_band_ratio": tremor_band_ratio(recent_accel(session.accel)),
         "ft_pasting_frequency": sum(1 for e in pastes if e.get("field") in SENSITIVE_PASTE_FIELDS),
         "ft_paste_beneficiary_count": sum(1 for e in pastes if e.get("field") == "beneficiary_account"),
-        "ft_hesitation_index": hesitation_index(touch, keys, ui),
+        "ft_hesitation_index": hesitation_index(keys, ui),
         "ft_typing_speed_cpm": (inserted * 60000.0 / active_ms) if inserted and active_ms else None,
         "ft_correction_rate": min(1.0, deleted / max(inserted, 1)) if inserted or deleted else None,
         "ft_touch_pressure_mean": statistics.fmean(pressures) if pressures else None,

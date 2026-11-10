@@ -142,21 +142,26 @@ object FortGuard {
         } catch (e: Exception) {
             return onResult(false, "Could not create the owner key: ${e.message}")
         }
-        val prompt = android.hardware.biometrics.BiometricPrompt.Builder(activity)
-            .setTitle("Confirm it's you")
-            .setSubtitle("FortGuard learns how this phone is usually used")
-            .setNegativeButton("Cancel", activity.mainExecutor, android.content.DialogInterface.OnClickListener { _, _ -> })
-            .build()
-        prompt.authenticate(android.os.CancellationSignal(), activity.mainExecutor,
-            object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult) {
-                    ownerWindowUntilMs = System.currentTimeMillis() + OwnerKeys.WINDOW_S * 1000L
-                    onResult(true, "Confirmed. Use the app normally for the next ${OwnerKeys.WINDOW_S / 60} minutes.")
-                }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    onResult(false, errString.toString())
-                }
-            })
+        // Any failure here is reported to the app, never thrown into its UI thread.
+        try {
+            val prompt = android.hardware.biometrics.BiometricPrompt.Builder(activity)
+                .setTitle("Confirm it's you")
+                .setSubtitle("FortGuard learns how this phone is usually used")
+                .setNegativeButton("Cancel", activity.mainExecutor, android.content.DialogInterface.OnClickListener { _, _ -> })
+                .build()
+            prompt.authenticate(android.os.CancellationSignal(), activity.mainExecutor,
+                object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult) {
+                        ownerWindowUntilMs = System.currentTimeMillis() + OwnerKeys.WINDOW_S * 1000L
+                        onResult(true, "Confirmed. Use the app normally for the next ${OwnerKeys.WINDOW_S / 60} minutes.")
+                    }
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        onResult(false, errString.toString())
+                    }
+                })
+        } catch (e: Exception) {
+            onResult(false, "Owner confirmation could not start: ${e.javaClass.simpleName}")
+        }
     }
 
     /** Seconds left in the owner window that this app session opened, 0 when closed or unknown. */

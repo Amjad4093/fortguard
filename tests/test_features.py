@@ -49,22 +49,30 @@ def test_flight_time_is_not_measured_across_fields():
     assert features.key_timings(keys)[1] == []
 
 
+def _keys_at(*times):
+    return [{"event_type": "DOWN", "ts": t, "field": "amount"} for t in times]
+
+
 def test_hesitation_index_by_hand():
-    touch = [pt("DOWN", 0, 0, 0)]
-    keys = [{"event_type": "DOWN", "ts": 10_000, "field": "amount"}]  # one 10 s pause
-    ui = [{"event_type": "FOCUS", "field": "amount", "ts": 15_000}]  # a 5 s pause
+    keys = _keys_at(0, 10_000)  # one 10 s pause between keystrokes
+    ui = [{"event_type": "FOCUS", "field": "amount", "ts": 15_000}]  # then a 5 s pause before focus
     # (10000 + 5000) / 20000 = 0.75
-    assert features.hesitation_index(touch, keys, ui) == pytest.approx(0.75)
+    assert features.hesitation_index(keys, ui) == pytest.approx(0.75)
 
 
 def test_short_gaps_are_not_hesitation():
-    touch = [pt("DOWN", 0, 0, t) for t in (0, 1000, 2500, 5000)]
-    assert features.hesitation_index(touch, [], []) == 0.0
+    keys = _keys_at(0, 1000, 2500, 5000)
+    assert features.hesitation_index(keys, []) == 0.0
+
+
+def test_fast_typing_is_never_hesitation():
+    keys = _keys_at(*range(0, 60_000, 150))  # about 400 keystrokes a minute, steady
+    assert features.hesitation_index(keys, []) == 0.0
 
 
 def test_hesitation_index_is_capped_at_one():
-    touch = [pt("DOWN", 0, 0, t) for t in (0, 60_000, 120_000)]
-    assert features.hesitation_index(touch, [], []) == 1.0
+    keys = _keys_at(0, 60_000, 120_000)
+    assert features.hesitation_index(keys, []) == 1.0
 
 
 def _accel_with_gravity(freq_hz, fs=50, seconds=4):

@@ -81,7 +81,7 @@ class FeatureState:
         # ui
         self.paste_sensitive = 0
         self.paste_beneficiary = 0
-        # hesitation (touch DOWN, key DOWN and all UI events). Kept as a sorted list of times so the
+        # hesitation (key DOWN and UI form events only; taps do not count). Kept as a sorted list of times so the
         # result is exact in any arrival order: inserting a time only changes the gaps next to it.
         self.input_times = []
         self.paused_ms = 0.0
@@ -114,8 +114,7 @@ class FeatureState:
         accel = sorted(accel, key=lambda s: s["ts"])
         gyro = sorted(gyro, key=lambda s: s["ts"])
         inputs = sorted(
-            [e["timestamp_ms"] for e in touch if e["event_type"] == "DOWN"]
-            + [e["ts"] for e in keys if e["event_type"] == "DOWN"]
+            [e["ts"] for e in keys if e["event_type"] == "DOWN"]
             + [e["ts"] for e in ui]
         )
         if (self._before(touch, "timestamp_ms", self.last_touch_ts) or self._before(keys, "ts", self.last_key_ts)
