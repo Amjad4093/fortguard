@@ -103,7 +103,10 @@ class FortGuardEngine(
             "touch_events" to d.touch,
             "key_events" to d.keys,
             "ui_events" to d.ui,
-            "sensor_data" to mapOf("accelerometer" to d.accel, "gyroscope" to d.gyro),
+            "sensor_data" to LinkedHashMap<String, Any?>(d.extra).apply {
+                put("accelerometer", d.accel)
+                put("gyroscope", d.gyro)
+            },
         )
         val signed = TelemetrySigning.sign(payload, key)
         val body = CanonicalJson.encode(signed)

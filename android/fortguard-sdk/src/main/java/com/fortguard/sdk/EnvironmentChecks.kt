@@ -2,6 +2,10 @@ package com.fortguard.sdk
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import android.os.StatFs
 import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
@@ -10,6 +14,8 @@ import android.os.Build
 import android.provider.Settings
 import android.view.WindowManager
 import java.io.File
+import java.util.Locale
+import java.util.TimeZone
 import java.util.function.Consumer
 
 /**
@@ -40,7 +46,58 @@ internal class EnvironmentChecks(context: Context) {
         "active_call" to inCall(),
         "vpn" to vpnActive(),
         "mock_location" to false, // needs location access; not collected in this version
-    )
+    ) + deviceFacts()
+
+    /**
+     * Device facts that need no permission: battery, network type, locale, time zone, screen,
+     * how long the app has been installed, and free storage. Each one is best-effort and omitted on error.
+     */
+    private fun deviceFacts(): Map<String, Any?> {
+        val out = LinkedHashMap<String, Any?>()
+        runCatching {
+            val battery = app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level >= 0 && scale > 0) out["battery_level"] = level * 100 / scale
+            val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            out["charging"] = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        }
+        runCatching { out["network_type"] = networkType() }
+        runCatching {
+            val locale = Locale.getDefault()
+            out["locale"] = if (locale.country.isEmpty()) locale.language else "${locale.language}-${locale.country}"
+        }
+        runCatching {
+            val id = TimeZone.getDefault().id
+            out["timezone"] = if (id.matches(Regex("[A-Za-z0-9_+\\-/]{1,64}"))) id else "unknown"
+        }
+        runCatching {
+            val dm = app.resources.displayMetrics
+            out["screen_width"] = dm.widthPixels
+            out["screen_height"] = dm.heightPixels
+            out["density"] = dm.density.toDouble()
+        }
+        runCatching {
+            val installed = app.packageManager.getPackageInfo(app.packageName, 0).firstInstallTime
+            out["app_install_age_days"] = ((System.currentTimeMillis() - installed) / 86_400_000L).coerceAtLeast(0L).toInt()
+        }
+        runCatching {
+            val stat = StatFs(app.filesDir.path)
+            out["free_storage_mb"] = (stat.availableBytes / (1024L * 1024L)).toInt()
+        }
+        return out
+    }
+
+    private fun networkType(): String {
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            else -> "other"
+        }
+    }
 
     // --- Screen recording (Android 15+) and mirroring -----------------------------------------
 

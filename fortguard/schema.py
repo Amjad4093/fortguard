@@ -25,7 +25,18 @@ ENV_BOOLS = (
     "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software",
     "screen_sharing", "active_call", "vpn", "mock_location",
 )
-ENV_ALLOWED = set(ENV_BOOLS) | {"os", "os_version"}
+ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
+    "battery_level": (0, 100, True),
+    "screen_width": (1, 10000, True),
+    "screen_height": (1, 10000, True),
+    "density": (0.5, 6.0, False),
+    "app_install_age_days": (0, 36500, True),
+    "free_storage_mb": (0, 10_000_000, True),
+}
+LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
+TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
+ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "charging", "network_type", "locale", "timezone"}
+               | set(ENV_EXTRA_NUMBERS))
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
 KEY_TYPES = {"DOWN", "UP"}
@@ -118,6 +129,23 @@ def validate_telemetry(p):
         not isinstance(env["os_version"], str) or not VERSION_RE.match(env["os_version"])
     ):
         _fail("invalid_request", "environment.os_version is not a valid version string")
+    if "charging" in env and not isinstance(env["charging"], bool):
+        _fail("invalid_request", "environment.charging must be true or false")
+    for name, (low, high, integer) in ENV_EXTRA_NUMBERS.items():
+        if name in env:
+            value = env[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                _fail("invalid_request", f"environment.{name} must be a number")
+            if integer and not float(value).is_integer():
+                _fail("invalid_request", f"environment.{name} must be a whole number")
+            if not low <= value <= high:
+                _fail("invalid_request", f"environment.{name} is out of range")
+    if "network_type" in env and env["network_type"] not in config.NETWORK_TYPES:
+        _fail("invalid_request", f"environment.network_type must be one of {list(config.NETWORK_TYPES)}")
+    if "locale" in env and (not isinstance(env["locale"], str) or not LOCALE_RE.match(env["locale"])):
+        _fail("invalid_request", "environment.locale is not a valid locale tag")
+    if "timezone" in env and (not isinstance(env["timezone"], str) or not TIMEZONE_RE.match(env["timezone"])):
+        _fail("invalid_request", "environment.timezone is not a valid zone name")
 
     for e in _need_list(p, "touch_events", config.MAX_TOUCH_PER_BATCH):
         if not isinstance(e, dict) or set(e) - TOUCH_KEYS:
@@ -141,9 +169,9 @@ def validate_telemetry(p):
         _check_event(e, "ui", UI_KEYS, UI_TYPES)
 
     sensors = p.get("sensor_data", {})
-    if not isinstance(sensors, dict) or set(sensors) - {"accelerometer", "gyroscope"}:
-        _fail("invalid_request", "sensor_data may only contain accelerometer and gyroscope")
-    for name in ("accelerometer", "gyroscope"):
+    if not isinstance(sensors, dict) or set(sensors) - set(config.SENSOR_NAMES):
+        _fail("invalid_request", "sensor_data may only contain: " + ", ".join(config.SENSOR_NAMES))
+    for name in config.SENSOR_NAMES:
         samples = sensors.get(name, [])
         if not isinstance(samples, list):
             _fail("invalid_request", f"{name} must be a list")

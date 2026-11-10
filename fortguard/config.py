@@ -76,6 +76,12 @@ MAX_TOUCH_PER_BATCH = 5000
 MAX_KEYS_PER_BATCH = 2000
 MAX_UI_PER_BATCH = 500
 MAX_SENSOR_PER_BATCH = 5000
+# Sensors the server accepts. Accelerometer and gyroscope feed the scoring; the rest are stored for
+# analysis and for the portal. Scalar sensors (light, proximity, pressure) use x only; y and z are 0.
+BASE_SENSORS = ("accelerometer", "gyroscope")
+EXTRA_SENSORS = ("magnetometer", "gravity", "linear_acceleration", "rotation_vector", "light", "proximity", "pressure")
+SENSOR_NAMES = BASE_SENSORS + EXTRA_SENSORS
+NETWORK_TYPES = ("wifi", "cellular", "ethernet", "none", "other")
 MAX_EVENTS_PER_SESSION = 50_000
 MAX_IDEMPOTENCY_ENTRIES = 100_000
 

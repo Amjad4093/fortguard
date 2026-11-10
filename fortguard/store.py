@@ -4,7 +4,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from . import config
+from . import config, schema
 from .incremental import FeatureState
 
 ANY_FLAGS = (
@@ -38,10 +38,12 @@ class Session:
     ui: list = field(default_factory=list)
     accel: list = field(default_factory=list)
     gyro: list = field(default_factory=list)
+    extra: dict = field(default_factory=dict)  # name -> samples, for sensors not used in scoring
     fstate: object = None  # incremental feature state (incremental.FeatureState)
 
     def event_count(self):
-        return len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
+        return (len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
+                + sum(len(v) for v in self.extra.values()))
 
 
 class SessionStore:
@@ -112,6 +114,12 @@ class SessionStore:
                     added[attr] = items
                     kept["sensor"] += len(items)
                     room -= len(items)
+                for name in config.EXTRA_SENSORS:
+                    items = sensors.get(name, [])[:room]
+                    if items:
+                        session.extra.setdefault(name, []).extend(items)
+                    kept["sensor"] += len(items)
+                    room -= len(items)
                 if session.fstate is None:
                     session.fstate = FeatureState()
                 session.fstate.update(added["touch"], added["keys"], added["ui"], added["accel"], added["gyro"])
@@ -127,5 +135,8 @@ class SessionStore:
         for name in LATEST_FLAGS:
             session.env[name] = bool(env.get(name, False))
         for name in ("os", "os_version"):
+            if name in env:
+                session.env[name] = env[name]
+        for name in ("charging", "network_type", "locale", "timezone") + tuple(schema.ENV_EXTRA_NUMBERS):
             if name in env:
                 session.env[name] = env[name]
