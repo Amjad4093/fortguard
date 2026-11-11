@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from fortguard import features
+from fortguard import config, features
 
 
 def pt(kind, x, y, t):
@@ -49,15 +49,18 @@ def test_flight_time_is_not_measured_across_fields():
     assert features.key_timings(keys)[1] == []
 
 
-def _keys_at(*times):
-    return [{"event_type": "DOWN", "ts": t, "field": "amount"} for t in times]
+def _keys_at(*times, field="beneficiary_account"):
+    return [{"event_type": "DOWN", "field": field, "ts": t} for t in times]
+
+
+def _ui(kind, ts, field="other"):
+    return {"event_type": kind, "field": field, "ts": ts}
 
 
 def test_hesitation_index_by_hand():
-    keys = _keys_at(0, 10_000)  # one 10 s pause between keystrokes
-    ui = [{"event_type": "FOCUS", "field": "amount", "ts": 15_000}]  # then a 5 s pause before focus
-    # (10000 + 5000) / 20000 = 0.75
-    assert features.hesitation_index(keys, ui) == pytest.approx(0.75)
+    # Two pauses inside one payment entry: 7 s (4 s beyond the 3 s allowance) and 5 s (2 s beyond).
+    keys = _keys_at(0, 7_000, 12_000)
+    assert features.hesitation_index(keys, []) == pytest.approx(0.6)
 
 
 def test_short_gaps_are_not_hesitation():
@@ -71,8 +74,49 @@ def test_fast_typing_is_never_hesitation():
 
 
 def test_hesitation_index_is_capped_at_one():
-    keys = _keys_at(0, 60_000, 120_000)
+    keys = _keys_at(0, 60_000, 120_000, 180_000)
     assert features.hesitation_index(keys, []) == 1.0
+
+
+def test_one_long_break_alone_never_reaches_the_flag():
+    # Leaving the app to copy an account number: one very long gap, then steady typing.
+    keys = _keys_at(0, 300, 120_000, 120_300, 120_600)
+    assert features.hesitation_index(keys, []) == pytest.approx(0.5)
+    assert features.hesitation_index(keys, []) < config.HESITATION_FLAG
+
+
+def test_time_before_the_payment_form_is_not_hesitation():
+    # The bug this replaces: tapping the sign-in box, browsing for 25 s, then typing a payment steadily.
+    ui = [_ui("FOCUS", 0, "username"), _ui("FOCUS", 25_000, "beneficiary_account"), _ui("SUBMIT", 31_000)]
+    keys = _keys_at(*range(25_400, 30_000, 350))
+    assert features.hesitation_index(keys, ui) == 0.0
+
+
+def test_sign_in_and_one_time_code_fields_are_ignored():
+    keys = _keys_at(0, 9_000, 18_000, field="password") + _keys_at(30_000, 39_000, 48_000, field="otp")
+    assert features.hesitation_index(keys, []) == 0.0
+
+
+def test_an_earlier_payment_does_not_carry_over():
+    # First entry is full of long pauses and is submitted. The second is typed steadily.
+    first = _keys_at(0, 9_000, 18_000, 27_000)
+    second = _keys_at(60_000, 60_300, 60_600, 60_900)
+    ui = [_ui("SUBMIT", 28_000), _ui("SUBMIT", 61_500)]
+    assert features.hesitation_index(first, [ui[0]]) == 1.0
+    assert features.hesitation_index(first + second, ui) == 0.0
+
+
+def test_the_wait_before_pressing_send_counts():
+    keys = _keys_at(0, 8_000)                       # 5 s beyond the allowance
+    ui = [_ui("SUBMIT", 14_000)]                     # 3 s beyond the allowance
+    assert features.hesitation_index(keys, ui) == pytest.approx(0.8)
+
+
+def test_an_entry_still_being_typed_is_the_one_measured():
+    done = _keys_at(0, 300, 600)
+    typing_now = _keys_at(20_000, 28_000, 36_000)
+    assert features.hesitation_index(done + typing_now, [_ui("SUBMIT", 1_000)]) == 1.0
+
 
 
 def _accel_with_gravity(freq_hz, fs=50, seconds=4):
@@ -122,3 +166,18 @@ def test_scripted_rule_fires_on_robotic_soft_keyboard_input(api, enrolled, resig
         api.post("/v1/telemetry/stream", resign(b, session))
     _, body = api.post("/v1/risk/evaluate", session["evaluate"], auth=True)
     assert "REASON_SCRIPTED_INPUT" in body["reason_codes"]
+
+
+def test_incremental_hesitation_matches_in_any_arrival_order():
+    """Batches can arrive split anywhere; the running value must equal the one-shot calculation."""
+    from fortguard.incremental import FeatureState
+
+    keys = _keys_at(0, 9_000, 18_000) + _keys_at(60_000, 60_300, 68_000, 76_500, field="amount")
+    ui = [_ui("FOCUS", -500, "username"), _ui("SUBMIT", 19_000), _ui("FOCUS", 59_000, "amount")]
+    want = features.hesitation_index(keys, ui)
+    assert want == pytest.approx(0.97)   # second entry only: 4.7 s and 5 s beyond the allowance
+    state = FeatureState()
+    state.update([], keys[:2], [ui[2]], [], [])
+    state.update([], keys[2:5], ui[:2], [], [])
+    state.update([], keys[5:], [], [], [])
+    assert state.features()["ft_hesitation_index"] == pytest.approx(want)

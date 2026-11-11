@@ -17,6 +17,7 @@ from collections import deque
 import numpy as np
 
 from . import config
+from .features import hesitation_from_marks, hesitation_marks
 
 SENSITIVE_PASTE_FIELDS = {"beneficiary_account", "amount", "otp"}
 
@@ -81,10 +82,8 @@ class FeatureState:
         # ui
         self.paste_sensitive = 0
         self.paste_beneficiary = 0
-        # hesitation (key DOWN and UI form events only; taps do not count). Kept as a sorted list of times so the
-        # result is exact in any arrival order: inserting a time only changes the gaps next to it.
-        self.input_times = []
-        self.paused_ms = 0.0
+        # hesitation: (time, is_submit) marks kept sorted, so the result is exact in any arrival order.
+        self.hesitation_marks = []
         # sensors
         self.accel_axes = [Running(), Running(), Running()]
         self.gyro_axes = [Running(), Running(), Running()]
@@ -113,10 +112,6 @@ class FeatureState:
         keys = sorted(keys, key=lambda e: e["ts"])
         accel = sorted(accel, key=lambda s: s["ts"])
         gyro = sorted(gyro, key=lambda s: s["ts"])
-        inputs = sorted(
-            [e["ts"] for e in keys if e["event_type"] == "DOWN"]
-            + [e["ts"] for e in ui]
-        )
         if (self._before(touch, "timestamp_ms", self.last_touch_ts) or self._before(keys, "ts", self.last_key_ts)
                 or self._before(accel, "ts", self.last_accel_ts) or self._before(gyro, "ts", self.last_gyro_ts)):
             self.stale = True
@@ -127,8 +122,8 @@ class FeatureState:
             if e["event_type"] == "PASTE":
                 self.paste_sensitive += e.get("field") in SENSITIVE_PASTE_FIELDS
                 self.paste_beneficiary += e.get("field") == "beneficiary_account"
-        for t in inputs:
-            self._insert_input_time(t)
+        for mark in hesitation_marks(keys, ui):
+            bisect.insort(self.hesitation_marks, mark)
         # Sensor batches are summarised with numpy and merged: exact, and far cheaper than per sample.
         if accel:
             a = np.array([(s["x"], s["y"], s["z"]) for s in accel], dtype=float)
@@ -144,24 +139,6 @@ class FeatureState:
             self.last_accel_ts = accel[-1]["ts"]
         if gyro:
             self.last_gyro_ts = gyro[-1]["ts"]
-
-    @staticmethod
-    def _pause(a, b):
-        gap = b - a
-        return min(gap, config.HESITATION_FULL_MS) if gap > config.HESITATION_GAP_MS else 0.0
-
-    def _insert_input_time(self, t):
-        times = self.input_times
-        i = bisect.bisect_right(times, t)
-        before = times[i - 1] if i > 0 else None
-        after = times[i] if i < len(times) else None
-        if before is not None and after is not None:
-            self.paused_ms -= self._pause(before, after)
-        if before is not None:
-            self.paused_ms += self._pause(before, t)
-        if after is not None:
-            self.paused_ms += self._pause(t, after)
-        times.insert(i, t)
 
     @staticmethod
     def _before(items, key, last):
@@ -257,7 +234,7 @@ class FeatureState:
             "ft_tremor_band_ratio": tremor_band_ratio(list(self.accel_recent)),
             "ft_pasting_frequency": self.paste_sensitive,
             "ft_paste_beneficiary_count": self.paste_beneficiary,
-            "ft_hesitation_index": min(1.0, self.paused_ms / config.HESITATION_FULL_MS),
+            "ft_hesitation_index": hesitation_from_marks(self.hesitation_marks),
             "ft_typing_speed_cpm": (self.typed_inserted * 60000.0 / self.typing_active_ms
                                     if self.typed_inserted and self.typing_active_ms else None),
             "ft_correction_rate": (min(1.0, self.typed_deleted / max(self.typed_inserted, 1))

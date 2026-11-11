@@ -166,23 +166,55 @@ def tremor_band_ratio(accel):
     return float(band / total)
 
 
-def hesitation_index(keys, ui):
-    """0 to 1. Total time spent in pauses longer than 3 s between form inputs, capped per pause.
+def hesitation_marks(keys, ui):
+    """(time, is_submit) for every event that matters to hesitation, unsorted.
 
-    Form inputs are keystrokes, field focus and submit. Taps that open screens, scrolling and other
-    touches are not counted: time spent reading a screen is not hesitation over the payment.
-    Continuous typing never leaves a gap this long, however fast it is.
+    Payment inputs are keystrokes, focus and paste in payment fields. Sign-in fields and one-time-code
+    fields are left out, and so are taps and scrolling: reading a screen is not hesitating over a payment.
     """
-    times = sorted(
-        [e["ts"] for e in keys if e["event_type"] == "DOWN"]
-        + [e["ts"] for e in ui]
-    )
-    paused = 0.0
-    for a, b in zip(times, times[1:]):
-        gap = b - a
-        if gap > config.HESITATION_GAP_MS:
-            paused += min(gap, config.HESITATION_FULL_MS)
-    return min(1.0, paused / config.HESITATION_FULL_MS)
+    ignored = config.HESITATION_IGNORED_FIELDS
+    marks = [(e["ts"], False) for e in keys if e["event_type"] == "DOWN" and e.get("field") not in ignored]
+    for e in ui:
+        if e["event_type"] == "SUBMIT":
+            marks.append((e["ts"], True))
+        elif e.get("field") not in ignored:
+            marks.append((e["ts"], False))
+    return marks
+
+
+def hesitation_from_marks(marks):
+    """0 to 1 from marks sorted by time. See hesitation_index."""
+    result = paused = 0.0
+    last = None
+    for ts, is_submit in marks:
+        if is_submit:
+            if last is not None:
+                result = paused + _pause(ts - last)
+            paused, last = 0.0, None       # the next input starts a new payment entry
+        else:
+            if last is not None:
+                paused += _pause(ts - last)
+            last = ts
+    if last is not None:                   # an entry still being typed is the latest one
+        result = paused
+    return min(1.0, result / config.HESITATION_FULL_MS)
+
+
+def _pause(gap):
+    """Pause time beyond the think-time allowance, capped so one long break counts for little."""
+    return min(max(0.0, gap - config.HESITATION_GAP_MS), config.HESITATION_PAUSE_CAP_MS)
+
+
+def hesitation_index(keys, ui):
+    """0 to 1. How long the customer paused while entering the latest payment.
+
+    A payment entry runs from its first payment input to its submit. Within it, each gap between inputs
+    counts only for the time beyond HESITATION_GAP_MS, at most HESITATION_PAUSE_CAP_MS per gap, and the
+    total maps to 1.0 at HESITATION_FULL_MS. So the flag needs at least two long pauses in one entry.
+    Time before the entry starts (signing in, browsing) and time after a submit never counts, so an
+    earlier payment in the same session does not carry over.
+    """
+    return hesitation_from_marks(sorted(hesitation_marks(keys, ui)))
 
 
 def recent_accel(accel):

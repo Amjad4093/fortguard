@@ -69,8 +69,13 @@ LINEAR_MEAN_DEVIATION_PX = 0.5    # a hand never draws a perfectly straight line
 NO_MOTION_MIN_TOUCHES = 5
 NO_MOTION_ACCEL_VAR = 1e-6        # a phone on a table still shows noise above this
 NO_MOTION_GYRO_VAR = 1e-8
-HESITATION_GAP_MS = 3000          # gaps longer than this between inputs count as pauses
-HESITATION_FULL_MS = 20000        # total pause time that maps to an index of 1.0
+# These three are judgement calls, not measured on real customers. Change them with real data.
+HESITATION_GAP_MS = 3000          # think time allowed between payment inputs; only the time beyond it counts
+HESITATION_PAUSE_CAP_MS = 5000    # most that one pause can count, so a single break (switching apps to copy
+                                  # an account number, answering the door) can never raise the flag alone
+HESITATION_FULL_MS = 10000        # counted pause time that maps to an index of 1.0
+# Inputs in these fields are not part of entering a payment: signing in, and waiting for a one-time code.
+HESITATION_IGNORED_FIELDS = frozenset({"username", "password", "otp"})
 HESITATION_FLAG = 0.6             # index at or above this is flagged
 TREMOR_BAND_HZ = (4.0, 12.0)
 
