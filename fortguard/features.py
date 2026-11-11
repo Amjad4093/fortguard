@@ -119,6 +119,40 @@ def typing_totals(keys):
     return inserted, deleted, active_ms
 
 
+def taps_of(touch):
+    """(down_ms, up_ms) for each tap: a touch that ends within SWIPE_MIN_PX of where it began."""
+    out = []
+    for g in _gestures(touch):
+        if math.hypot(g[-1]["x"] - g[0]["x"], g[-1]["y"] - g[0]["y"]) < config.SWIPE_MIN_PX:
+            out.append((g[0]["timestamp_ms"], g[-1]["timestamp_ms"]))
+    return out
+
+
+def tap_summary(tap_list):
+    """(durations_ms, long presses, double taps) from taps in time order."""
+    durations = [up - down for down, up in tap_list]
+    long_presses = sum(1 for d in durations if d >= config.LONG_PRESS_MS)
+    double_taps = sum(1 for (_, up), (down, _) in zip(tap_list, tap_list[1:]) if 0 <= down - up < config.DOUBLE_TAP_MS)
+    return durations, long_presses, double_taps
+
+
+def tilt(mean_x, mean_y, mean_z, samples, variance):
+    """(pitch degrees, roll degrees, lying flat 1.0 or 0.0) from the average pull of gravity.
+
+    Pitch and roll say how the phone is held: flat on a desk reads near 0 and 0, upright in a hand reads
+    a pitch or roll far from 0. "Lying flat" also needs the phone to be still. All None without samples.
+    """
+    if not samples:
+        return None, None, None
+    pitch = math.degrees(math.atan2(-mean_x, math.hypot(mean_y, mean_z)))
+    roll = math.degrees(math.atan2(mean_y, mean_z))
+    if samples < config.FLAT_MIN_SAMPLES or variance is None:
+        return pitch, roll, None
+    pull = math.sqrt(mean_x ** 2 + mean_y ** 2 + mean_z ** 2)
+    flat = pull > 0 and abs(mean_z) / pull >= config.FLAT_GRAVITY_SHARE and variance <= config.FLAT_MAX_ACCEL_VAR
+    return pitch, roll, 1.0 if flat else 0.0
+
+
 def tap_intervals(touch):
     """Gaps in ms between consecutive touch-downs that are close enough to be one interaction."""
     downs = sorted(e["timestamp_ms"] for e in touch if e["event_type"] == "DOWN")
@@ -240,6 +274,10 @@ def compute_features_full(session):
     sizes = [e["size"] for e in touch if "size" in e]
     taps = tap_intervals(touch)
     speeds = swipe_speeds(touch)
+    tap_ms, long_presses, double_taps = tap_summary(taps_of(touch))
+    accel = session.accel
+    means = [statistics.fmean(s[axis] for s in accel) for axis in ("x", "y", "z")] if accel else [0.0, 0.0, 0.0]
+    pitch, roll, flat = tilt(*means, len(accel), _variance_sum(accel))
     return {
         "ft_touch_count": sum(1 for e in touch if e["event_type"] == "DOWN"),
         "ft_swipe_count": len(deviations),
@@ -266,4 +304,10 @@ def compute_features_full(session):
         "ft_touch_size_mean": statistics.fmean(sizes) if sizes else None,
         "ft_tap_interval_mean_ms": statistics.fmean(taps) if taps else None,
         "ft_swipe_speed_px_s": statistics.fmean(speeds) if speeds else None,
+        "ft_tap_duration_mean_ms": statistics.fmean(tap_ms) if tap_ms else None,
+        "ft_long_press_count": long_presses,
+        "ft_double_tap_count": double_taps,
+        "ft_tilt_pitch_deg": pitch,
+        "ft_tilt_roll_deg": roll,
+        "ft_lying_flat": flat,
     }

@@ -9,6 +9,7 @@
     "status": "NONE"
   },
   "degraded": false,
+  "deny_list": [],
   "latency_ms": 0.0,
   "ml": {
     "anomalous": false,

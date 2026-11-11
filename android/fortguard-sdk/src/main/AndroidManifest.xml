@@ -13,6 +13,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- The remote-access apps the SDK may check for, by name. Android shows an app no other package
+         without this list, and the SDK never reads the customer's full app list. Keep it in step with
+         EnvironmentChecks.REMOTE_ACCESS_PACKAGES. -->
+    <queries>
+        <package android:name="com.anydesk.anydeskandroid" />
+        <package android:name="com.teamviewer.quicksupport.market" />
+        <package android:name="com.teamviewer.host.market" />
+        <package android:name="com.sand.airdroid" />
+        <package android:name="com.carriez.flutter_hbb" />
+    </queries>
+
     <application>
         <service
             android:name="com.fortguard.sdk.FortGuardMotionService"

@@ -181,3 +181,40 @@ def test_incremental_hesitation_matches_in_any_arrival_order():
     state.update([], keys[2:5], ui[:2], [], [])
     state.update([], keys[5:], [], [], [])
     assert state.features()["ft_hesitation_index"] == pytest.approx(want)
+
+
+# --- Taps, long presses, double taps and tilt (derived from the raw touch and motion events) ------
+
+def _tap(down, up, x=100, y=200, dx=0):
+    return [{"event_type": "DOWN", "x": x, "y": y, "timestamp_ms": down},
+            {"event_type": "UP", "x": x + dx, "y": y, "timestamp_ms": up}]
+
+
+def test_tap_durations_long_presses_and_double_taps_by_hand():
+    touch = (_tap(0, 80) + _tap(200, 290)          # second starts 120 ms after the first ended: a double tap
+             + _tap(2_000, 2_700)                  # held 700 ms: a long press
+             + _tap(5_000, 5_100, dx=200))         # moved 200 px: a swipe, not a tap
+    durations, long_presses, double_taps = features.tap_summary(features.taps_of(touch))
+    assert durations == [80, 90, 700]
+    assert long_presses == 1
+    assert double_taps == 1
+
+
+def test_a_phone_lying_still_on_a_desk_reads_flat():
+    pitch, roll, flat = features.tilt(0.02, -0.03, 9.80, 200, 0.001)
+    assert abs(pitch) < 1 and abs(roll) < 1 and flat == 1.0
+
+
+def test_a_phone_held_upright_is_not_flat():
+    pitch, roll, flat = features.tilt(0.3, 8.5, 4.9, 200, 0.4)
+    assert roll == pytest.approx(60.0, abs=1.0)
+    assert flat == 0.0
+
+
+def test_a_flat_but_moving_phone_is_not_lying_flat():
+    assert features.tilt(0.0, 0.0, 9.8, 200, 0.5)[2] == 0.0
+
+
+def test_tilt_is_unknown_without_motion_data():
+    assert features.tilt(0.0, 0.0, 0.0, 0, None) == (None, None, None)
+    assert features.tilt(0.0, 0.0, 9.8, 5, 0.001)[2] is None       # too few samples to call it flat

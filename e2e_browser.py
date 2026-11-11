@@ -157,10 +157,24 @@ def main():
             portal.screenshot(path=str(shots / "portal_case.png"), full_page=True)
             portal.goto(BASE + "/portal#/rules")
             portal.wait_for_selector("text=Points per signal")
+            # The deny list: block a payee account, see it listed by its last four characters, remove it.
+            portal.goto(BASE + "/portal#/deny")
+            portal.wait_for_selector("text=Add an entry")
+            portal.fill("input[aria-label='Value to block']", "PK36 SCBL 0000 0011 2345 6702")
+            portal.fill("input[aria-label='Reason']", "Confirmed mule account, case 1")
+            portal.click("button:has-text('Block')")
+            portal.wait_for_selector("text=••••6702")
+            portal.wait_for_timeout(500)  # entrance animation
+            portal.screenshot(path=str(shots / "portal_deny.png"))
+            listed = "PK36" not in portal.inner_text("#view")
+            portal.once("dialog", lambda d: d.accept())
+            portal.click("button:has-text('Remove')")
+            portal.wait_for_selector("text=Nothing is on the deny list.")
             portal.goto(BASE + "/portal#/audit")
             portal.wait_for_selector("text=added a note")
-            print("open cases:", open_cases, "| case worked, note added, audit shows it")
-            ok &= open_cases >= 1
+            portal.wait_for_selector("text=removed from the deny list")
+            print("open cases:", open_cases, "| case worked, note added, deny list add and remove, audit shows it")
+            ok &= open_cases >= 1 and listed
             desk.close()
 
             errors = [l for l in logs if "PAGEERROR" in l or "Failed to load" in l]

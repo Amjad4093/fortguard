@@ -13,6 +13,7 @@ FORCE_STEP_UP_REASONS = (
     "REASON_DEVICE_ROOTED_OR_JAILBROKEN",
     "REASON_EMULATOR_DETECTED",
     "REASON_HOOKING_FRAMEWORK_DETECTED",
+    "REASON_DEBUGGER_ATTACHED",
     "REASON_REMOTE_ACCESS_TOOL_ACTIVE",
 )
 BOT_REASONS = (
@@ -72,11 +73,14 @@ def _behavioral_reasons(feats, sensitive):
     return found
 
 
-def score_session(session, event_type, tx, baselines=None, user_id=None):
+def score_session(session, event_type, tx, baselines=None, user_id=None, denied=()):
+    """denied: which deny-list kinds matched this request (customer, device, account, ip), if any."""
     env = session.env
     sensitive = event_type in config.SENSITIVE_EVENTS
     tx = tx or {}
     reasons = []
+    if denied:
+        reasons.append("REASON_ON_DENY_LIST")
 
     if env.get("is_rooted"):
         reasons.append("REASON_DEVICE_ROOTED_OR_JAILBROKEN")
@@ -84,6 +88,10 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
         reasons.append("REASON_EMULATOR_DETECTED")
     if env.get("has_hooking_framework"):
         reasons.append("REASON_HOOKING_FRAMEWORK_DETECTED")
+    if env.get("debugger_attached"):
+        reasons.append("REASON_DEBUGGER_ATTACHED")
+    # A remote-access tool merely being installed (env remote_access_installed) is a recorded fact and
+    # never a reason: plenty of honest customers have one. Only a tool in control of the screen counts.
     if env.get("active_remote_software"):
         reasons.append("REASON_REMOTE_ACCESS_TOOL_ACTIVE")
     # The flags above are reported by the app itself, so a compromised app can lie. The attestation
@@ -104,6 +112,10 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
     new_payee = bool(tx.get("is_new_beneficiary")) and sensitive
     if new_payee:
         reasons.append("REASON_NEW_BENEFICIARY")
+    if env.get("sim_changed"):
+        reasons.append("REASON_SIM_CHANGED")
+        if new_payee:
+            reasons.append("REASON_SIM_SWAP_PATTERN")
 
     feats = None
     if session.consent_behavioral:
@@ -163,6 +175,7 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
         "scoring_mode": "RULES_AND_ML" if ml and ml["status"] == "ACTIVE" else "RULES_ONLY",
         "model_version": config.MODEL_VERSION,
         "degraded": False,
+        "deny_list": sorted(denied),
         "_features": feats,
     }
 
@@ -170,11 +183,12 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
 DEGRADED_REASONS = ("REASON_DEGRADED_NO_TELEMETRY", "REASON_DEGRADED_SCORING_ERROR")
 
 
-def degraded_decision(event_type, tx, reason):
+def degraded_decision(event_type, tx, reason, denied=()):
     """Answer from the transaction alone when behavior cannot be scored (PRD fail policy).
 
-    A new payee or a large amount steps up; everything else is allowed and logged. Never a BLOCK:
-    blocking a customer because FortGuard had a problem would be worse than asking for a second factor.
+    A new payee or a large amount steps up; everything else is allowed and logged. Never a BLOCK because
+    FortGuard had a problem: that would be worse than asking for a second factor. The one exception is
+    the bank's own deny list, which blocks here as it does everywhere.
     """
     assert reason in DEGRADED_REASONS
     tx = tx or {}
@@ -182,12 +196,15 @@ def degraded_decision(event_type, tx, reason):
     amount = tx.get("amount") or 0
     risky = sensitive and (bool(tx.get("is_new_beneficiary")) or amount >= config.DEGRADED_STEP_UP_AMOUNT)
     score = config.bands_for(event_type)["step_up_from"] if risky else 0
-    level = level_for(score, event_type)
+    if denied:
+        score = config.SCORE_MAX
+    level = "BLOCK" if denied else level_for(score, event_type)
     return {
         "risk_score": score,
         "risk_level": level,
         "action_recommended": config.ACTIONS[level],
-        "reason_codes": [reason],
+        "reason_codes": (["REASON_ON_DENY_LIST"] if denied else []) + [reason],
+        "deny_list": sorted(denied),
         "threat_details": {"bot_probability": 0.0, "rat_detected": False, "coercion_scam_probability": 0.0,
                            "user_biometric_match_score": None},
         "score_breakdown": [{"reason": reason, "points": score}],

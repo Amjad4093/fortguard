@@ -13,6 +13,11 @@ ANY_FLAGS = (
     "mock_location",
 )
 LATEST_FLAGS = ("active_call", "cellular_call", "screen_sharing")
+# Facts from newer SDKs. Stored only when the app reports them, so an older app or an iPhone that cannot
+# measure one shows "not reported" in the back office, never a false "no".
+STICKY_FACTS = ("debugger_attached", "sim_changed", "keyboard_changed", "remote_access_installed",
+                "developer_options", "unknown_accessibility_service")
+LATEST_FACTS = ("roaming", "screen_reader")
 
 
 class ReplayDetected(Exception):
@@ -149,7 +154,11 @@ class SessionStore:
         for name in ("os", "os_version"):
             if name in env:
                 session.env[name] = env[name]
-        for name in ("charging", "network_type", "locale", "timezone", "device_model") + tuple(schema.ENV_EXTRA_NUMBERS):
+        for name in STICKY_FACTS:
+            if name in env:
+                session.env[name] = bool(session.env.get(name, False) or env[name])
+        for name in LATEST_FACTS + ("charging", "network_type", "locale", "timezone", "device_model",
+                                    "security_patch", "carrier", "call_direction") + tuple(schema.ENV_EXTRA_NUMBERS):
             if name in env:
                 session.env[name] = env[name]
 

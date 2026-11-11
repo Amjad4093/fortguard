@@ -24,6 +24,10 @@ TOP_REQUIRED = ("session_id", "device_guid", "app_id", "timestamp_ms", "nonce", 
 ENV_BOOLS = (
     "is_rooted", "is_emulator", "has_hooking_framework", "active_remote_software",
     "screen_sharing", "active_call", "cellular_call", "vpn", "mock_location",
+    # Facts added for parity with the platform team's signal catalogue. Only two are scored
+    # (debugger_attached, sim_changed); the rest are recorded and shown, never a reason on their own.
+    "debugger_attached", "developer_options", "screen_reader", "unknown_accessibility_service",
+    "remote_access_installed", "roaming", "sim_changed", "keyboard_changed",
 )
 ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "battery_level": (0, 100, True),
@@ -33,12 +37,21 @@ ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "density": (0.5, 6.0, False),
     "app_install_age_days": (0, 36500, True),
     "free_storage_mb": (0, 10_000_000, True),
+    "font_scale": (0.2, 5.0, False),
+    "call_seconds": (0, 86_400, True),          # how long the current phone call has lasted
+    "background_switches": (0, 100_000, True),  # times the app left the foreground since it started
+    "screens_visited": (0, 100_000, True),
+    "tz_offset_minutes": (-900, 900, True),
 }
+CALL_DIRECTIONS = ("incoming", "outgoing", "unknown")
+SECURITY_PATCH_RE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")   # Android security patch level, e.g. 2026-09-05
+CARRIER_RE = re.compile(r"^\d{5,6}$")                       # mobile country code + network code, digits only
 DEVICE_MODEL_RE = re.compile(r"^[A-Za-z0-9 _\-.()/+]{1,80}$")  # e.g. "Pixel 8", "SM-S921B"
 CUSTOMER_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
 TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
-ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone", "location"}
+ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone", "location",
+                                 "security_patch", "carrier", "call_direction"}
                | set(ENV_EXTRA_NUMBERS))
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
@@ -173,6 +186,12 @@ def validate_telemetry(p):
         _fail("invalid_request", "environment.locale is not a valid locale tag")
     if "timezone" in env and (not isinstance(env["timezone"], str) or not TIMEZONE_RE.match(env["timezone"])):
         _fail("invalid_request", "environment.timezone is not a valid zone name")
+    if "security_patch" in env and (not isinstance(env["security_patch"], str) or not SECURITY_PATCH_RE.match(env["security_patch"])):
+        _fail("invalid_request", "environment.security_patch must look like 2026-09-05")
+    if "carrier" in env and (not isinstance(env["carrier"], str) or not CARRIER_RE.match(env["carrier"])):
+        _fail("invalid_request", "environment.carrier must be 5 or 6 digits")
+    if "call_direction" in env and env["call_direction"] not in CALL_DIRECTIONS:
+        _fail("invalid_request", f"environment.call_direction must be one of {list(CALL_DIRECTIONS)}")
 
     for e in _need_list(p, "touch_events", config.MAX_TOUCH_PER_BATCH):
         if not isinstance(e, dict) or set(e) - TOUCH_KEYS:

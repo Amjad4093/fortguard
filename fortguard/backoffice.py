@@ -33,6 +33,7 @@ Endpoints (all under /v1/bo, bearer token unless noted)
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -99,7 +100,45 @@ CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, label TEXT NOT NULL,
     decided_level TEXT, source TEXT, note TEXT, time_ms INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS feedback_session ON feedback(session_id);
+CREATE TABLE IF NOT EXISTS deny_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value_hash TEXT NOT NULL, label TEXT NOT NULL,
+    reason TEXT NOT NULL, added_by TEXT NOT NULL, created_ms INTEGER NOT NULL, expires_ms INTEGER,
+    UNIQUE(kind, value_hash));
 """
+
+# What the bank can put on its deny list. A match on any of them blocks the decision.
+DENY_KINDS = ("customer", "device", "account", "ip")
+DENY_MAX_DAYS = 3650
+
+
+def _deny_value(kind, value):
+    """The value in the one form it is compared in, or a ValidationFailure when it cannot be that kind."""
+    if not isinstance(value, str):
+        raise ValidationFailure(400, "invalid_request", "value must be text")
+    value = value.strip()
+    if kind == "customer" and re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", value):
+        return value
+    if kind == "device" and re.fullmatch(r"[A-Za-z0-9_\-]{8,64}", value):
+        return value
+    if kind == "account":
+        compact = re.sub(r"\s+", "", value).upper()
+        if 8 <= len(compact) <= 40 and compact.isalnum():
+            return compact
+    if kind == "ip":
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            pass
+    raise ValidationFailure(400, "invalid_request", f"that is not a valid {kind}")
+
+
+def _deny_hash(kind, value):
+    return hashlib.sha256(f"{kind}:{value}".encode()).hexdigest()
+
+
+def _deny_label(kind, value):
+    """What the back office shows. A payee account is shown by its last four characters only."""
+    return "••••" + value[-4:] if kind == "account" else value
 
 
 # --- Passwords -------------------------------------------------------------------------------------
@@ -140,6 +179,8 @@ class BackOffice:
             self.db.executescript(SCHEMA)
             self.db.commit()
         self.defaults = {"weights": dict(config.WEIGHTS), "bands": json.loads(json.dumps(config.BANDS))}
+        self._deny = {}          # (kind, value_hash) -> expires_ms or None, kept in memory for the decision path
+        self._load_deny()
 
     def now_ms(self):
         return int(self.clock() * 1000)
@@ -299,6 +340,54 @@ class BackOffice:
         return out
 
     # rules
+    # --- deny list ---------------------------------------------------------------------------------
+
+    def _load_deny(self):
+        rows = self.q("SELECT kind, value_hash, expires_ms FROM deny_list")
+        self._deny = {(r["kind"], r["value_hash"]): r["expires_ms"] for r in rows}
+
+    def deny_add(self, kind, value, reason, actor, expires_ms=None):
+        value = _deny_value(kind, value)
+        try:
+            self.x("INSERT INTO deny_list (kind, value_hash, label, reason, added_by, created_ms, expires_ms) VALUES (?,?,?,?,?,?,?)",
+                   (kind, _deny_hash(kind, value), _deny_label(kind, value), reason, actor, self.now_ms(), expires_ms))
+        except sqlite3.IntegrityError:
+            raise ValidationFailure(409, "already_listed", f"that {kind} is already on the deny list") from None
+        self._load_deny()
+        return self.q("SELECT * FROM deny_list WHERE kind=? AND value_hash=?", (kind, _deny_hash(kind, value)))[0]
+
+    def deny_remove(self, entry_id):
+        rows = self.q("SELECT * FROM deny_list WHERE id=?", (entry_id,))
+        if not rows:
+            return None
+        self.x("DELETE FROM deny_list WHERE id=?", (entry_id,))
+        self._load_deny()
+        return rows[0]
+
+    def deny_entries(self):
+        now = self.now_ms()
+        return [{"id": r["id"], "kind": r["kind"], "label": r["label"], "reason": r["reason"], "added_by": r["added_by"],
+                 "created_ms": r["created_ms"], "expires_ms": r["expires_ms"],
+                 "expired": r["expires_ms"] is not None and r["expires_ms"] <= now}
+                for r in self.q("SELECT * FROM deny_list ORDER BY id DESC")]
+
+    def deny_match(self, **values):
+        """Which kinds of this request are on the deny list and not expired, e.g. ("account",)."""
+        if not self._deny:
+            return ()
+        now = self.now_ms()
+        hit = []
+        for kind, value in values.items():
+            if not value:
+                continue
+            try:
+                key = (kind, _deny_hash(kind, _deny_value(kind, value)))
+            except ValidationFailure:
+                continue
+            if key in self._deny and (self._deny[key] is None or self._deny[key] > now):
+                hit.append(kind)
+        return tuple(hit)
+
     def load_rules(self):
         """Apply rule settings saved earlier, if any."""
         rows = self.q("SELECT value FROM settings WHERE key='rules'")
@@ -569,6 +658,40 @@ def register(app, *, bo, api_key, registry, dev_mode):
             raise ValidationFailure(404, "unknown_device", "no such device")
         bo.audit(user["username"], "device_revoke", f"device:{device_guid}", None)
         return jsonify({"device_guid": device_guid, "status": "REVOKED"})
+
+    # deny list
+    @app.get("/v1/bo/deny-list")
+    def bo_deny_list():
+        need("viewer")
+        return jsonify({"entries": bo.deny_entries(), "kinds": list(DENY_KINDS)})
+
+    @app.post("/v1/bo/deny-list")
+    def bo_deny_add():
+        user = need("analyst")
+        data = body()
+        if set(data) - {"kind", "value", "reason", "expires_days"}:
+            raise ValidationFailure(400, "unknown_field", "send kind, value, reason and optionally expires_days")
+        if data.get("kind") not in DENY_KINDS:
+            raise ValidationFailure(400, "invalid_request", f"kind must be one of {list(DENY_KINDS)}")
+        reason = data.get("reason")
+        if not isinstance(reason, str) or not 3 <= len(reason.strip()) <= 200 or any(ord(c) < 32 for c in reason):
+            raise ValidationFailure(400, "invalid_request", "give a reason of 3 to 200 characters")
+        days = data.get("expires_days")
+        if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= DENY_MAX_DAYS):
+            raise ValidationFailure(400, "invalid_request", f"expires_days must be a whole number from 1 to {DENY_MAX_DAYS}")
+        expires = bo.now_ms() + days * 86_400_000 if days else None
+        row = bo.deny_add(data["kind"], data.get("value"), reason.strip(), user["username"], expires)
+        bo.audit(user["username"], "deny_add", f"{row['kind']}:{row['label']}", {"reason": row["reason"], "expires_days": days})
+        return jsonify({"entries": bo.deny_entries()}), 201
+
+    @app.delete("/v1/bo/deny-list/<int:entry_id>")
+    def bo_deny_remove(entry_id):
+        user = need("analyst")
+        row = bo.deny_remove(entry_id)
+        if row is None:
+            raise ValidationFailure(404, "unknown_entry", "no such deny-list entry")
+        bo.audit(user["username"], "deny_remove", f"{row['kind']}:{row['label']}", {"reason": row["reason"]})
+        return jsonify({"entries": bo.deny_entries()})
 
     # rules
     def rules_view():

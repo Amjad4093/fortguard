@@ -39,8 +39,8 @@ bank backend
 
 `/portal` is the back office: sign in, dashboard, case queue (step-up and block decisions open cases
 automatically), case detail with reasons, notes, status, assignee and history, devices with revoke, rule
-weights and decision bands editable live, users with roles (viewer, analyst, admin) and an audit log of every
-change. Data is kept in SQLite (`FORTGUARD_DATA_DIR`). The first user is `admin`; its password comes from
+weights and decision bands editable live, a deny list (customers, devices, payee accounts and IP addresses
+the bank blocks outright), users with roles (viewer, analyst, admin) and an audit log of every change. Data is kept in SQLite (`FORTGUARD_DATA_DIR`). The first user is `admin`; its password comes from
 `FORTGUARD_ADMIN_PASSWORD`, or is `fortguard-admin-dev` in dev mode, or is printed at start.
 
 ## iOS SDK and demo app
@@ -167,8 +167,14 @@ the response, for a genuine session and a coached-scam session. They are reprodu
 `fortguard/config.py` holds every weight and threshold. Each rule that fires adds points and a reason
 code; the score is capped at 1000. Bands are the PRD starting values: ALLOW 0 to 599, STEP_UP 600 to
 899, BLOCK 900 to 1000. A rooted or jailbroken device, an emulator, a hooking framework or remote-access
-software lifts the score to at least 600, as in the BRD example. The response lists `score_breakdown`
-so every point can be traced to a rule.
+software lifts the score to at least 600, as in the BRD example, and so does a debugger attached to the app.
+A match on the bank's deny list scores 1000 and blocks. A SIM change alone adds a little; with a payment to a
+new payee it is the SIM-swap pattern and steps up. The response lists `score_breakdown` so every point can be
+traced to a rule.
+
+Hesitation is measured inside one payment entry only: from its first payment input to pressing send, counting
+each pause beyond 3 seconds for at most 5 seconds. Signing in, browsing and earlier payments never count.
+`docs/COMPARISON.md` compares the signals here with the platform team's FortGuard and lists what was added.
 
 Behavior rules use five features from BRD FR-ING-002 (swipe curvature, keystroke hold and flight time,
 device angle stability, paste frequency, hesitation index). Typing rhythm is measured within one field

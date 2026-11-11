@@ -30,6 +30,8 @@ WEIGHTS = {
     "REASON_DEVICE_ROOTED_OR_JAILBROKEN": 250,
     "REASON_EMULATOR_DETECTED": 400,
     "REASON_HOOKING_FRAMEWORK_DETECTED": 400,
+    # A debugger is attached to the banking app: someone is inspecting or changing it while it runs.
+    "REASON_DEBUGGER_ATTACHED": 400,
     "REASON_REMOTE_ACCESS_TOOL_ACTIVE": 450,
     "REASON_SCREEN_SHARING_ACTIVE": 300,
     "REASON_LOCATION_SPOOFING_SUSPECTED": 300,
@@ -40,6 +42,14 @@ WEIGHTS = {
     "REASON_COGNITIVE_HESITATION_DETECTED": 200,
     "REASON_NEW_BENEFICIARY": 150,
     "REASON_COACHED_SCAM_PATTERN": 150,
+    # The SIM's operator is different from the last time this app ran. On its own a small signal (people
+    # change network); with a payment to a new payee it is the usual shape of a SIM-swap takeover, and the
+    # pattern reason lifts the two into the step-up band. Weights are a judgement, not measured.
+    # The bank put this customer, device, payee account or network address on its deny list. Worth the
+    # whole scale on its own, so the decision is a block whatever else the session looks like.
+    "REASON_ON_DENY_LIST": 1000,
+    "REASON_SIM_CHANGED": 150,
+    "REASON_SIM_SWAP_PATTERN": 300,
     "REASON_SCRIPTED_INPUT": 500,
     "REASON_PERFECT_LINEAR_SWIPES": 350,
     "REASON_NO_PHYSICAL_MOTION": 300,
@@ -60,6 +70,11 @@ FORCE_STEP_UP_MIN_SCORE = 600
 
 # --- Feature and rule thresholds ----------------------------------------------
 SWIPE_MIN_PX = 30                 # a gesture shorter than this is a tap, not a swipe
+LONG_PRESS_MS = 500               # a tap held at least this long is a long press
+DOUBLE_TAP_MS = 300               # a tap starting this soon after the last one ended is a double tap
+FLAT_MIN_SAMPLES = 20             # accelerometer samples needed before "lying flat" is judged
+FLAT_GRAVITY_SHARE = 0.98         # share of gravity along the screen's axis when the phone lies flat
+FLAT_MAX_ACCEL_VAR = 0.02         # and it is still: a judgement, not measured on real phones
 TYPING_MAX_GAP_MS = 2000           # gaps between keystrokes longer than this are pauses, not typing
 TAP_MAX_GAP_MS = 3000              # gaps between taps longer than this are separate interactions
 SCRIPTED_MIN_KEYS = 6             # keys needed before timing is judged

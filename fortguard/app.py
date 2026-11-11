@@ -251,11 +251,14 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
 
         session = store.get(body["session_id"])
         started = time.perf_counter()
+        tx_account = (body.get("transaction_details") or {}).get("beneficiary_account")
+        denied = bo.deny_match(customer=body["user_id"], device=getattr(session, "device_guid", None),
+                               account=tx_account, ip=getattr(session, "ip", None))
         if session is None:
             if not body.get("allow_degraded"):
                 return _error(404, "unknown_session", "no telemetry has been received for this session")
             # PRD fail policy: answer from the transaction alone, clearly marked as degraded.
-            result = degraded_decision(body["event_type"], body.get("transaction_details"), "REASON_DEGRADED_NO_TELEMETRY")
+            result = degraded_decision(body["event_type"], body.get("transaction_details"), "REASON_DEGRADED_NO_TELEMETRY", denied)
             session = _NoSession(body["user_id"])
         else:
             with store.lock:
@@ -264,13 +267,13 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
                 session.user_id = body["user_id"]
                 try:
                     result = score_session(session, body["event_type"], body.get("transaction_details"),
-                                           baselines=baselines, user_id=body["user_id"])
+                                           baselines=baselines, user_id=body["user_id"], denied=denied)
                 except Exception:
                     if not body.get("allow_degraded"):
                         raise
                     app.logger.exception("scoring failed; answering in degraded mode")
                     result = degraded_decision(body["event_type"], body.get("transaction_details"),
-                                               "REASON_DEGRADED_SCORING_ERROR")
+                                               "REASON_DEGRADED_SCORING_ERROR", denied)
         feats = result.pop("_features", None)
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)

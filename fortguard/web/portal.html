@@ -297,6 +297,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     <div class="group">Manage</div>
     <a href="#/devices" data-page="devices">Devices</a>
     <a href="#/rules" data-page="rules">Rules</a>
+    <a href="#/deny" data-page="deny">Deny list</a>
     <a href="#/users" data-page="users" class="admin-only">Users</a>
     <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
     <div class="spacer"></div>
@@ -319,7 +320,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   var STATUS_TEXT = { OPEN: "Open", INVESTIGATING: "Investigating", CONFIRMED_FRAUD: "Confirmed fraud", FALSE_POSITIVE: "False positive", CLOSED: "Closed" };
   var ACTION_TEXT = { login: "signed in", login_failed: "failed sign-in", logout: "signed out", case_update: "updated case", note_add: "added a note",
     device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios",
-    feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data" };
+    feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data",
+    deny_add: "added to the deny list", deny_remove: "removed from the deny list" };
 
   try { S.token = sessionStorage.getItem("fg_token"); } catch (e) { /* ignore */ }
 
@@ -417,7 +419,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var v = $("view"); v.innerHTML = "";
     var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
       customers: parts[1] ? function (x) { return customerDetail(x, decodeURIComponent(parts[1])); } : customers,
-      devices: devices, rules: rules, users: users, audit: audit };
+      devices: devices, rules: rules, deny: denyList, users: users, audit: audit };
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
@@ -428,6 +430,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     "Decisions": "Every decision, newest first. Numbers only, never typed text.",
     "Devices": "Phones that have enrolled with FortGuard. Revoke a device to stop it sending data.",
     "Rules": "Points for each signal, and the score bands that decide allow, step-up and block.",
+    "Deny list": "Customers, devices, payee accounts and network addresses the bank has decided to block. A match blocks the decision whatever else the session looks like.",
     "Users": "Who can sign in to this back office, and what each role may do.",
     "Audit log": "A record of every change and sign-in. Entries cannot be edited."
   };
@@ -646,7 +649,12 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   SIGNALS.forEach(function (s) { SIGNAL_LABEL[s[0]] = s[1]; });
   var ENV_FLAGS = [["is_rooted", "Rooted or jailbroken"], ["is_emulator", "Emulator"], ["has_hooking_framework", "Hooking framework"],
     ["active_remote_software", "Remote-control app running"], ["screen_sharing", "Screen being shared"], ["active_call", "Call in progress"], ["cellular_call", "Phone (GSM) call"],
-    ["vpn", "VPN on"], ["mock_location", "Mock location on"]];
+    ["vpn", "VPN on"], ["mock_location", "Mock location on"],
+    // Reported by newer apps only. An app that does not send one is simply not listed, never shown as "No".
+    ["debugger_attached", "Debugger attached to the app"], ["sim_changed", "SIM changed in the last 72 hours"],
+    ["remote_access_installed", "Remote-access app installed"], ["unknown_accessibility_service", "Unrecognised accessibility service on"],
+    ["developer_options", "Developer options on"], ["keyboard_changed", "Keyboard app changed since last use"],
+    ["screen_reader", "Screen reader on"], ["roaming", "Roaming"]];
 
   function formatFeature(v, unit) {
     if (v == null || typeof v !== "number") return null;
@@ -710,7 +718,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     return card("Touch positions", [el("p", { class: "hint", text: "Where the finger landed across the screen. Darker cells had more touches." }),
       el("div", { class: "heat", role: "img", "aria-label": "Touch positions across the screen" }, cells),
       kvList(featureRows(f, [["ft_touch_count", "Touches", ""], ["ft_swipe_count", "Swipes", ""], ["ft_touch_pressure_mean", "Average pressure", ""],
-        ["ft_touch_size_mean", "Contact size", ""], ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"]])) || el("div")]);
+        ["ft_touch_size_mean", "Contact size", ""], ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"],
+        ["ft_tap_duration_mean_ms", "How long a tap is held", "ms"], ["ft_long_press_count", "Long presses", ""], ["ft_double_tap_count", "Double taps", ""]])) || el("div")]);
   }
 
   function deviceCard(d) {
@@ -727,12 +736,21 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       ["Free storage", e.free_storage_mb != null ? (e.free_storage_mb / 1024).toFixed(1) + " GB" : null],
       ["App installed for", e.app_install_age_days != null ? e.app_install_age_days + " days" : null],
       ["Network switches in session", e.network_changes != null ? String(e.network_changes) : null],
+      ["Mobile network code", e.carrier || null],
+      ["Security patch", e.security_patch || null],
+      ["Phone call", e.call_direction ? (e.call_direction === "unknown" ? "Direction unknown" : (e.call_direction === "incoming" ? "Incoming" : "Outgoing")) + (e.call_seconds != null ? ", " + duration(e.call_seconds * 1000) + " so far" : "") : null],
+      ["Times the app went to the background", e.background_switches != null ? String(e.background_switches) : null],
+      ["Screens opened", e.screens_visited != null ? String(e.screens_visited) : null],
+      ["Text size setting", e.font_scale != null ? Math.round(e.font_scale * 100) + "%" : null],
+      ["Clock offset from UTC", e.tz_offset_minutes != null ? (e.tz_offset_minutes >= 0 ? "+" : "−") + (Math.abs(e.tz_offset_minutes) / 60).toFixed(1).replace(/\.0$/, "") + " h" : null],
       ["Client IP address", n.ip || null],
       ["IP address changes in session", n.ip != null ? String(n.ip_changes || 0) : null],
       ["Approximate location", n.location ? n.location.lat + ", " + n.location.lng + " (about 1 km)" : null],
       ["Location jump detected", n.location_jump != null ? (n.location_jump ? "Yes" : "No") : null]
     ].concat(ENV_FLAGS.filter(function (fl) { return fl[0] in e; }).map(function (fl) { return [fl[1], e[fl[0]] ? "Yes" : "No"]; }));
-    var motion = featureRows(f, [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""]]);
+    var motion = featureRows(f, [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""],
+      ["ft_tilt_pitch_deg", "Tilt, front to back", "°"], ["ft_tilt_roll_deg", "Tilt, side to side", "°"]]);
+    if (f.ft_lying_flat != null) motion.push(["Lying still on a flat surface", f.ft_lying_flat ? "Yes" : "No"]);
     var kids = [kvList(rows) || el("div", { class: "empty", text: "No device facts were sent." })];
     if (kvList(motion)) kids.push(el("div", { class: "sub", text: "Motion" }), kvList(motion));
     return card("Device and environment", kids);
@@ -1051,6 +1069,38 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       return el("tr", {}, [el("td", { text: u.username }), el("td", {}, [sel]), el("td", {}, [pill(u.active ? "ACTIVE" : "inactive", u.active ? "active" : "inactive")]), el("td", { text: when(u.created_ms) }), el("td", {}, [reset, " ", toggle])]);
     });
     v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["User", "Role", "Status", "Created", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)])]));
+  }
+
+  // --- deny list ---------------------------------------------------------------------------------------------------
+  var DENY_KIND = { customer: "Customer ID", device: "Device ID", account: "Payee account", ip: "Network address (IP)" };
+  async function denyList(v) {
+    head(v, "Deny list");
+    var data = await call("GET", "/v1/bo/deny-list");
+    if (can("analyst")) {
+      var kind = el("select", { "aria-label": "What to block" }, data.kinds.map(function (k) { return el("option", { value: k, text: DENY_KIND[k] || k }); }));
+      kind.value = "account";
+      var value = el("input", { placeholder: "value to block", "aria-label": "Value to block", autocomplete: "off", style: "min-width:260px" });
+      var reason = el("input", { placeholder: "why (shown in the audit log)", "aria-label": "Reason", autocomplete: "off", style: "min-width:260px" });
+      var days = el("input", { type: "number", min: "1", max: "3650", placeholder: "days (optional)", "aria-label": "Days until the entry expires", title: "Leave blank for no end date", style: "width:150px" });
+      v.appendChild(card("Add an entry", [el("div", { class: "toolbar" }, [kind, value, reason, days, el("button", { class: "primary", type: "button", text: "Block", onclick: async function () {
+        var body = { kind: kind.value, value: value.value, reason: reason.value };
+        if (days.value) body.expires_days = Number(days.value);
+        try { await call("POST", "/v1/bo/deny-list", body); say("Added to the deny list."); route(); } catch (e) { say(e.message, true); }
+      } })]), el("p", { class: "msg", text: "A payee account is stored as a one-way fingerprint and shown by its last four characters only. Spaces and letter case do not matter when matching." })]));
+    }
+    var rows = data.entries.map(function (d) {
+      var remove = can("analyst") ? el("button", { type: "button", text: "Remove", onclick: async function () {
+        if (!confirm("Remove " + d.label + " from the deny list?")) return;
+        try { await call("DELETE", "/v1/bo/deny-list/" + d.id); say("Removed."); route(); } catch (e) { say(e.message, true); }
+      } }) : null;
+      return el("tr", {}, [el("td", { text: DENY_KIND[d.kind] || d.kind }), el("td", { class: "mono", text: d.label }),
+        el("td", { style: "white-space:normal;min-width:200px", text: d.reason }), el("td", { text: d.added_by }), el("td", { text: when(d.created_ms) }),
+        el("td", {}, [d.expires_ms ? (d.expired ? pill("GREY", "Expired") : document.createTextNode(when(d.expires_ms))) : document.createTextNode("No end date")]),
+        el("td", {}, [remove])]);
+    });
+    v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {},
+      ["Blocked", "Value", "Reason", "Added by", "Added", "Expires", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+      rows.length ? null : el("div", { class: "empty", text: "Nothing is on the deny list." })]));
   }
 
   // --- audit -------------------------------------------------------------------------------------------------------

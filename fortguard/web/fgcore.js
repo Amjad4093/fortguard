@@ -83,6 +83,10 @@
     REASON_BEHAVIORAL_ANOMALY_HIGH: "Behavior is far from this customer's own usual pattern.",
     REASON_ML_BEHAVIOR_ANOMALY: "The machine-learning model found this session unlike the customer's usual sessions.",
     REASON_LOCATION_JUMP_DETECTED: "The phone was in two places too far apart, too fast.",
+    REASON_DEBUGGER_ATTACHED: "A debugger is attached to the app.",
+    REASON_SIM_CHANGED: "The SIM's operator changed since the app last ran.",
+    REASON_SIM_SWAP_PATTERN: "SIM changed and money is going to a new payee: the usual shape of a SIM-swap takeover.",
+    REASON_ON_DENY_LIST: "The customer, device, payee account or network address is on the bank's deny list.",
     REASON_DEGRADED_NO_TELEMETRY: "Degraded mode: no behavioral data, decided from the transaction alone.",
     REASON_DEGRADED_SCORING_ERROR: "Degraded mode: scoring failed, decided from the transaction alone."
   };

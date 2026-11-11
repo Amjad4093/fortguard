@@ -17,7 +17,7 @@ from collections import deque
 import numpy as np
 
 from . import config
-from .features import hesitation_from_marks, hesitation_marks
+from .features import hesitation_from_marks, hesitation_marks, tilt
 
 SENSITIVE_PASTE_FIELDS = {"beneficiary_account", "amount", "otp"}
 
@@ -68,6 +68,10 @@ class FeatureState:
         self.stale = False
         # touch
         self.touch_downs = 0
+        self.tap_duration = Running()
+        self.long_presses = 0
+        self.double_taps = 0
+        self.last_tap_up = None
         self.gesture = None            # points of the gesture in progress
         self.swipes = Running()
         self.last_touch_ts = None
@@ -171,6 +175,13 @@ class FeatureState:
                 self.gesture_ts.append(ts)
                 pts = self.gesture
                 self.gesture = None
+                if math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]) < config.SWIPE_MIN_PX:
+                    down = self.gesture_ts[0]
+                    self.tap_duration.add(ts - down)
+                    self.long_presses += ts - down >= config.LONG_PRESS_MS
+                    if self.last_tap_up is not None and 0 <= down - self.last_tap_up < config.DOUBLE_TAP_MS:
+                        self.double_taps += 1
+                    self.last_tap_up = ts
                 if len(pts) >= 4 and math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]) >= config.SWIPE_MIN_PX:
                     dev = _mean_deviation(pts)
                     if dev is not None:
@@ -216,6 +227,8 @@ class FeatureState:
             return sum(r.pvariance() for r in axes) if axes[0].n >= 2 else None
 
         s, f, h = self.swipes, self.flights, self.holds
+        ax = self.accel_axes
+        pitch, roll, flat = tilt(ax[0].mean, ax[1].mean, ax[2].mean, ax[0].n, var_sum(ax))
         return {
             "ft_touch_count": self.touch_downs,
             "ft_swipe_count": s.n,
@@ -244,4 +257,10 @@ class FeatureState:
             "ft_touch_size_mean": self.touch_size.mean if self.touch_size.n else None,
             "ft_tap_interval_mean_ms": self.taps.mean if self.taps.n else None,
             "ft_swipe_speed_px_s": self.swipe_speed.mean if self.swipe_speed.n else None,
+            "ft_tap_duration_mean_ms": self.tap_duration.mean if self.tap_duration.n else None,
+            "ft_long_press_count": self.long_presses,
+            "ft_double_tap_count": self.double_taps,
+            "ft_tilt_pitch_deg": pitch,
+            "ft_tilt_roll_deg": roll,
+            "ft_lying_flat": flat,
         }
