@@ -1017,7 +1017,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
         if (!confirm("Revoke " + d.device_guid + "?")) return;
         try { await call("POST", "/v1/bo/devices/" + encodeURIComponent(d.device_guid) + "/revoke"); route(); } catch (e) { say(e.message, true); }
       } }) : null;
-      return el("tr", {}, [el("td", {}, [el("div", { text: d.model || "Model not reported yet" }), el("small", { class: "mono", text: short(d.device_guid, 18) }), el("small", { class: "mono", text: d.last_ip ? "IP " + d.last_ip : "" })]),
+      return el("tr", {}, [el("td", {}, [el("div", { text: d.model || "Model not reported yet" }), el("small", { class: "mono", title: d.device_guid, text: short(d.device_guid, 28) }), el("small", { class: "mono", text: d.last_ip ? "IP " + d.last_ip : "" }),
+        d.key_version > 1 ? el("small", { title: "The app was installed again, or its key was replaced, on the same phone.", text: "Enrolled " + d.key_version + " times" }) : null]),
         el("td", { text: (d.os || d.platform) + (d.os_version ? " " + d.os_version : "") }), el("td", { text: d.app_id }),
         el("td", { text: d.integrity_level || "–" }), el("td", { text: d.owner_enrolled ? "Yes" : "No" }),
         el("td", { text: (d.customers || []).join(", ") || "–" }), el("td", { text: d.last_seen_ms ? when(d.last_seen_ms) : "–" }),

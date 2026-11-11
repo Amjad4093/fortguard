@@ -563,7 +563,8 @@ class MainActivity : Activity() {
         val s = FortGuard.status()
         if (::statusText.isInitialized) {
             statusText.text = buildString {
-                append("Device: ${s.deviceGuid ?: "starting"}\n")
+                append("Device: ${s.deviceGuid ?: FortGuard.deviceId(this@MainActivity)}\n")
+                append("Customer: ${userId()}\n")
                 append("Enrollment: ${s.enrolledLevel?.let { "enrolled, attestation $it (simulated)" } ?: "not yet"}\n")
                 append("Session: ${s.sessionId ?: "-"}\n")
                 append("Motion sensors: ${s.motionSensors}\n")
@@ -838,9 +839,12 @@ class MainActivity : Activity() {
         if (::callStatusView.isInitialized) callStatusView.text = callLine()
     }
 
-    private fun userId(): String =
-        prefs.getString("user", null) ?: ("usr_" + java.util.UUID.randomUUID().toString().replace("-", "").take(10))
-            .also { prefs.edit().putString("user", it).apply() }
+    /**
+     * The demo has no bank behind it to supply a customer number, so the customer id is tied to the phone:
+     * the same after a reinstall, and easy to match with the device in the back office. A real bank app
+     * passes its own customer id to FortGuard.identify instead.
+     */
+    private fun userId(): String = "usr_" + FortGuard.deviceId(this).removePrefix("dev_").take(12)
 
     private fun showLastBatch() {
         val json = FortGuard.lastBatchJson() ?: "Nothing sent yet."

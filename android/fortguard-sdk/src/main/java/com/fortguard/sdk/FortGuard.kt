@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.widget.EditText
 import com.fortguard.sdk.core.ApiClient
 import com.fortguard.sdk.core.AttestationProvider
@@ -13,6 +14,7 @@ import com.fortguard.sdk.core.EventBuffer
 import com.fortguard.sdk.core.Field
 import com.fortguard.sdk.core.FortGuardEngine
 import com.fortguard.sdk.core.Ids
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -101,7 +103,7 @@ object FortGuard {
         if (motion == null) motion = MotionCapture(app, buffer)
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         identityFields = storedIdentity(prefs)
-        val guid = prefs.getString(KEY_GUID, null) ?: Ids.random("dev_", 12).also { prefs.edit().putString(KEY_GUID, it).apply() }
+        val guid = deviceId(app)
         timer?.cancel(false)
         // Scheduled before the engine is built, so a saved configuration that changes the interval replaces this one.
         flushEveryMs = config.flushIntervalMs
@@ -353,7 +355,10 @@ object FortGuard {
         AndroidKeys.delete()
         OwnerKeys.delete()
         ownerWindowUntilMs = 0L
-        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_GUID).apply()
+        // A reset is a tester asking for a fresh device: change the salt so the id changes too. Reinstalling
+        // the app clears the salt, which brings the phone's original id back.
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().remove(KEY_GUID).putInt(KEY_SALT, prefs.getInt(KEY_SALT, 0) + 1).apply()
         buffer.clear()
         lastMessage = "device reset"
     }
@@ -381,4 +386,27 @@ object FortGuard {
     private val CUSTOMER_ID = Regex("[A-Za-z0-9_-]{1,64}")
     @Volatile private var identityFields: Map<String, String> = emptyMap()
     private const val KEY_GUID = "device_guid"
+    private const val KEY_SALT = "device_salt"
+
+    /**
+     * This phone's FortGuard device id: the same value after the app is uninstalled and installed again,
+     * and the one the back office shows. It can be read before init().
+     *
+     * It is a one-way hash of Android's per-app device identifier (ANDROID_ID), so it differs from the id
+     * any other company's app sees, cannot be turned back into the Android value, and changes on a factory
+     * reset or if the app is signed with a different key. Only if Android gives no identifier does the SDK
+     * fall back to a random id kept in app storage, which a reinstall does lose.
+     */
+    fun deviceId(context: Context): String {
+        val app = context.applicationContext
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val androidId = runCatching { Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID) }.getOrNull()
+        // 9774d56d682e549c is a value some old, faulty phones all shared; it identifies nothing.
+        if (!androidId.isNullOrBlank() && androidId != "9774d56d682e549c") {
+            val salt = prefs.getInt(KEY_SALT, 0)
+            val digest = MessageDigest.getInstance("SHA-256").digest("fortguard.device.v1|$androidId|$salt".toByteArray())
+            return "dev_" + digest.joinToString("") { "%02x".format(it) }.take(24)
+        }
+        return prefs.getString(KEY_GUID, null) ?: Ids.random("dev_", 12).also { prefs.edit().putString(KEY_GUID, it).apply() }
+    }
 }

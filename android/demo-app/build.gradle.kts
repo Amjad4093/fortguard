@@ -23,9 +23,21 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    signingConfigs {
+        // DEMO ONLY. This key is public in the repository so that every build of the demo is signed the
+        // same way: a new build installs over the old one, and Android gives the app the same device
+        // identifier after a reinstall. A real bank app is signed with the bank's own private key.
+        getByName("debug") {
+            storeFile = file("demo.keystore")
+            storePassword = "android"
+            keyAlias = "fortguard-demo"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
