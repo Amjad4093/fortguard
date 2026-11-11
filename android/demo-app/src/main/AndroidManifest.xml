@@ -2,11 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:label="FortGuard Demo"
-        android:icon="@android:drawable/ic_lock_lock"
+        android:label="FortGuard"
+        android:icon="@drawable/ic_fortguard"
+        android:roundIcon="@drawable/ic_fortguard"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
             android:name=".MainActivity"

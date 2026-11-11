@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App icon: the FortGuard shield in teal on navy. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#07111F"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2FD3A7"
+        android:strokeWidth="5"
+        android:strokeLineJoin="round"
+        android:pathData="M54,24 L76,32.4 V50.6 C76,64.6 66.9,74.4 54,79.3 C41.1,74.4 32,64.6 32,50.6 V32.4 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4AA8FF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M44.5,52 L51.5,59 L64,45" />
+</vector>

@@ -20,6 +20,11 @@ object DemoBackend {
         val coercionProbability: Double,
         val remoteTool: Boolean,
         val latencyMs: Double,
+        /** The server's machine-learning model for this customer: NONE, LEARNING, ACTIVE or INSUFFICIENT_FEATURES. */
+        val mlStatus: String,
+        val mlSessions: Int,
+        val mlRequired: Int,
+        val mlAnomalous: Boolean,
     )
 
     fun evaluate(
@@ -41,6 +46,7 @@ object DemoBackend {
         check(r.status == 200) { r.describe() }
         val b = r.body
         val threat = b["threat_details"] as? Map<*, *> ?: emptyMap<String, Any?>()
+        val ml = b["ml"] as? Map<*, *> ?: emptyMap<String, Any?>()
         val breakdown = (b["score_breakdown"] as? List<*>).orEmpty().mapNotNull { item ->
             val m = item as? Map<*, *> ?: return@mapNotNull null
             (m["reason"] as? String ?: return@mapNotNull null) to ((m["points"] as? Number)?.toInt() ?: 0)
@@ -54,6 +60,10 @@ object DemoBackend {
             coercionProbability = (threat["coercion_scam_probability"] as? Number)?.toDouble() ?: 0.0,
             remoteTool = threat["rat_detected"] == true,
             latencyMs = (b["latency_ms"] as? Number)?.toDouble() ?: 0.0,
+            mlStatus = ml["status"] as? String ?: "NONE",
+            mlSessions = (ml["sessions"] as? Number)?.toInt() ?: 0,
+            mlRequired = (ml["required"] as? Number)?.toInt() ?: 10,
+            mlAnomalous = ml["anomalous"] == true,
         )
     }
 

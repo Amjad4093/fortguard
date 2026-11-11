@@ -3,6 +3,7 @@ package com.example.fortguarddemo
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -10,6 +11,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -49,16 +53,15 @@ class MainActivity : Activity() {
         const val DEMO_BALANCE = "PKR 245,300.00"
         const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
 
-        val PRIMARY = Color.rgb(11, 61, 145)
-        val NAVY = Color.rgb(8, 34, 84)
-        val ACCENT = Color.rgb(0, 168, 143)
-        val BG = Color.rgb(243, 246, 251)
-        val CARD = Color.WHITE
-        val INK = Color.rgb(27, 36, 48)
-        val MUTED = Color.rgb(107, 119, 133)
-        val OK = Color.rgb(29, 122, 70)
-        val WARN = Color.rgb(138, 90, 0)
-        val DANGER = Color.rgb(179, 38, 30)
+        // One palette for every screen, shared with the back office. See Brand.kt.
+        val BG = Brand.BG
+        val CARD = Brand.CARD
+        val INK = Brand.INK
+        val MUTED = Brand.MUTED
+        val ACCENT = Brand.ACCENT
+        val OK = Brand.ACCENT
+        val WARN = Brand.WARN
+        val DANGER = Brand.DANGER
     }
 
     private val io = Executors.newSingleThreadExecutor()
@@ -72,6 +75,7 @@ class MainActivity : Activity() {
     private var sensorsShown: List<String> = emptyList()
     private val tabViews = HashMap<String, View>()
     private val tabButtons = HashMap<String, TextView>()
+    private val tabMarks = HashMap<String, View>()
     private val signalValues = HashMap<String, TextView>()
 
     private var loginView: View? = null
@@ -93,8 +97,9 @@ class MainActivity : Activity() {
     private lateinit var newPayee: CheckBox
     private lateinit var checkButton: Button
     private lateinit var resultCard: LinearLayout
-    private lateinit var resultText: TextView
     private lateinit var homeDecision: TextView
+    private lateinit var homeModel: TextView
+    private lateinit var greeting: TextView
     private lateinit var typingText: TextView
     private lateinit var signalsList: LinearLayout
 
@@ -166,12 +171,14 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(32), dp(32), dp(32), dp(32))
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(NAVY, PRIMARY))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Brand.DEEP, Brand.NAVY, Brand.NAVY))
         }
-        col.addView(text("FortGuard", 34f, Color.WHITE, bold = true))
-        col.addView(text("Secure banking demo", 15f, Color.argb(210, 255, 255, 255)).apply { setPadding(0, dp(4), 0, dp(32)) })
-        col.addView(ProgressBar(this).apply { isIndeterminate = true })
-        loadingStatus = text("Starting...", 14f, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, 0) }
+        col.addView(ShieldView(this), LinearLayout.LayoutParams(dp(84), dp(96)))
+        col.addView(wordmark(38f).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, 0) })
+        col.addView(byline().apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
+        col.addView(text("Behavioural fraud protection for mobile banking", 14f, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(36)) })
+        col.addView(ProgressBar(this).apply { isIndeterminate = true; indeterminateTintList = ColorStateList.valueOf(ACCENT) })
+        loadingStatus = text("Starting...", 14f, INK).apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, 0) }
         col.addView(loadingStatus)
         shell.removeAllViews()
         shell.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -206,17 +213,16 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(40), dp(20), dp(24))
             setBackgroundColor(BG)
         }
-        col.addView(text("FortGuard", 28f, PRIMARY, bold = true))
-        col.addView(text("Sign in to your account", 15f, MUTED).apply { setPadding(0, dp(2), 0, dp(20)) })
-        col.addView(text("Version ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_DATE}", 12f, MUTED)
-            .apply { setPadding(0, 0, 0, dp(12)) })
+        col.addView(brandHeader(), lp(bottom = 28))
+        col.addView(eyebrow("Demo Bank"))
+        col.addView(text("Sign in to your account", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, dp(18)) })
 
         val box = card()
         loginName = input("Full name", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
         loginUser = input("Username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         loginPassword = input("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         // Pre-filled for testers. Set before FortGuard watches the fields, so the fill is not recorded as typing.
-        loginName.setText(DEMO_NAME)
+        loginName.setText(prefs.getString("name", DEMO_NAME))
         loginUser.setText(DEMO_USER)
         loginPassword.setText(DEMO_PASSWORD)
         FortGuard.watch(loginUser, Field.USERNAME)
@@ -234,6 +240,8 @@ class MainActivity : Activity() {
         demo.addView(text("Username: $DEMO_USER\nPassword: $DEMO_PASSWORD", 13f, MUTED).apply { setPadding(0, dp(4), 0, 0) })
         demo.addView(text("Built into this demo so testers can reach every screen. It is not a customer login.", 12f, MUTED).apply { setPadding(0, dp(6), 0, 0) })
         col.addView(demo)
+        col.addView(text("Version ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_DATE}", 12f, MUTED)
+            .apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, 0) })
 
         return ScrollView(this).apply { setBackgroundColor(BG); addView(col) }
     }
@@ -251,6 +259,7 @@ class MainActivity : Activity() {
         }
         // Tells FortGuard which customer is using this phone, so their time in the app and name reach the back office.
         FortGuard.identify(this, userId(), name)
+        prefs.edit().putString("name", name).apply()
         loggedIn = true
         loginPassword.setText("")
         loginError.text = ""
@@ -272,21 +281,30 @@ class MainActivity : Activity() {
         contentFrame = FrameLayout(this)
         col.addView(contentFrame, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
+        col.addView(divider())
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(CARD)
-            elevation = dp(6).toFloat()
+            setBackgroundColor(Brand.NAVY)
         }
         for ((key, label) in listOf("home" to "Home", "transfer" to "Send", "signals" to "Signals", "settings" to "Settings")) {
+            // Each tab is a short accent bar above its label; the bar shows only on the selected tab.
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setOnClickListener { selectTab(key) }
+            }
+            val mark = View(this).apply { background = rounded(ACCENT, 2) }
+            cell.addView(mark, LinearLayout.LayoutParams(dp(28), dp(3)))
             val tab = TextView(this).apply {
                 text = label
                 textSize = 13f
                 gravity = Gravity.CENTER
-                setPadding(0, dp(14), 0, dp(14))
-                setOnClickListener { selectTab(key) }
+                setPadding(0, dp(12), 0, dp(14))
             }
+            cell.addView(tab, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             tabButtons[key] = tab
-            bar.addView(tab, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            tabMarks[key] = mark
+            bar.addView(cell, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         }
         col.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         shell.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -306,32 +324,48 @@ class MainActivity : Activity() {
         contentFrame.removeAllViews()
         contentFrame.addView(view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         for ((k, tab) in tabButtons) {
-            tab.setTextColor(if (k == key) PRIMARY else MUTED)
+            tab.setTextColor(if (k == key) ACCENT else MUTED)
             tab.setTypeface(null, if (k == key) Typeface.BOLD else Typeface.NORMAL)
+            tabMarks[k]?.visibility = if (k == key) View.VISIBLE else View.INVISIBLE
         }
+        if (::greeting.isInitialized) greeting.text = "Hello, ${firstName()}"
         refreshLive()
     }
 
     private fun buildHome(): View {
         val col = column()
-        col.addView(text("Hello, $DEMO_USER", 22f, INK, bold = true))
-        col.addView(text("Your accounts", 14f, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+        col.addView(brandHeader(), lp(bottom = 20))
+        greeting = text("Hello, ${firstName()}", 24f, INK, bold = true)
+        col.addView(greeting)
+        col.addView(text("Your accounts", 14f, MUTED).apply { setPadding(0, dp(2), 0, dp(14)) })
 
         val balance = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(PRIMARY, NAVY)).apply { cornerRadius = dp(16).toFloat() }
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Brand.DEEP, Brand.CARD)).apply {
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Brand.LINE)
+            }
         }
-        balance.addView(text("Current account", 13f, Color.argb(220, 255, 255, 255)))
-        balance.addView(text(DEMO_BALANCE, 26f, Color.WHITE, bold = true).apply { setPadding(0, dp(6), 0, dp(12)) })
-        balance.addView(text("Protected by FortGuard", 12f, ACCENT, bold = true))
-        col.addView(balance, lp(bottom = 16))
+        balance.addView(text("Current account", 13f, MUTED))
+        balance.addView(text(DEMO_BALANCE, 28f, INK, bold = true).apply { setPadding(0, dp(6), 0, dp(14)) })
+        val guarded = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        guarded.addView(ShieldView(this), LinearLayout.LayoutParams(dp(16), dp(18)))
+        guarded.addView(text("Protected by FortGuard", 12f, ACCENT, bold = true).apply { setPadding(dp(8), 0, 0, 0) })
+        balance.addView(guarded)
+        col.addView(balance, lp(bottom = 14))
 
         val decision = card()
-        decision.addView(text("Latest security check", 15f, INK, bold = true))
-        homeDecision = text("No transfer checked yet. Send money to see a live decision.", 14f, MUTED).apply { setPadding(0, dp(6), 0, 0) }
+        decision.addView(eyebrow("Latest security check"))
+        homeDecision = text("No transfer checked yet. Send money to see a live decision.", 14f, MUTED).apply { setPadding(0, dp(8), 0, 0) }
         decision.addView(homeDecision)
-        col.addView(decision, lp(bottom = 16))
+        col.addView(decision, lp(bottom = 14))
+
+        val model = card()
+        model.addView(eyebrow("Learning model"))
+        homeModel = text("FortGuard learns how you use the app. Check a transfer to see how far it has got.", 14f, MUTED).apply { setPadding(0, dp(8), 0, 0) }
+        model.addView(homeModel)
+        col.addView(model, lp(bottom = 16))
 
         col.addView(row(
             primaryButton("Send money") { selectTab("transfer") },
@@ -343,7 +377,8 @@ class MainActivity : Activity() {
 
     private fun buildTransfer(): View {
         val col = column()
-        col.addView(text("Send money", 22f, INK, bold = true).apply { setPadding(0, 0, 0, dp(12)) })
+        col.addView(eyebrow("Payment"))
+        col.addView(text("Send money", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, dp(14)) })
         val form = card()
         accountInput = input("Beneficiary account (IBAN)", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         amountInput = input("Amount in PKR", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
@@ -351,22 +386,22 @@ class MainActivity : Activity() {
         FortGuard.watch(amountInput, Field.AMOUNT)
         form.addView(label("Beneficiary account")); form.addView(accountInput)
         form.addView(label("Amount (PKR)")); form.addView(amountInput)
-        newPayee = CheckBox(this).apply { text = "New beneficiary"; isChecked = true; setTextColor(INK) }
+        newPayee = CheckBox(this).apply { text = "New beneficiary"; isChecked = true; styleCheck(this) }
         form.addView(newPayee, lp(top = 8))
         checkButton = primaryButton("Check risk and send") { checkRisk() }
         form.addView(checkButton, lp(top = 12))
         col.addView(form, lp(bottom = 16))
 
         resultCard = card()
-        resultText = text("Enter the details and press the button. FortGuard decides before the money moves.", 14f, MUTED)
-        resultCard.addView(resultText)
         col.addView(resultCard)
+        showNeutral("Enter the details and press the button. FortGuard decides before the money moves.")
         return scroll(col)
     }
 
     private fun buildSignals(): View {
         val col = column()
-        col.addView(text("What FortGuard sees", 22f, INK, bold = true))
+        col.addView(eyebrow("Live signals"))
+        col.addView(text("What FortGuard sees", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, 0) })
         col.addView(text("Every signal this phone can provide. Values update every second while you use the app.", 13f, MUTED).apply { setPadding(0, dp(2), 0, dp(12)) })
         val typing = card()
         typingText = text("", 14f, INK)
@@ -385,7 +420,8 @@ class MainActivity : Activity() {
 
     private fun buildSettings(): View {
         val col = column()
-        col.addView(text("Settings", 22f, INK, bold = true).apply { setPadding(0, 0, 0, dp(12)) })
+        col.addView(eyebrow("For testers"))
+        col.addView(text("Settings", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, dp(14)) })
 
         val server = card()
         server.addView(text("Test server", 15f, INK, bold = true))
@@ -410,7 +446,7 @@ class MainActivity : Activity() {
         consent = CheckBox(this).apply {
             text = "Customer consents to behavioural capture"
             isChecked = prefs.getBoolean("consent", true)
-            setTextColor(INK)
+            styleCheck(this)
             setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("consent", on).apply(); FortGuard.setConsent(on) }
         }
         server.addView(consent, lp(top = 8))
@@ -452,7 +488,7 @@ class MainActivity : Activity() {
         owner.addView(CheckBox(this).apply {
             text = "Keep motion checks running after I close the app"
             isChecked = prefs.getBoolean("background_motion", false)
-            setTextColor(INK)
+            styleCheck(this)
             setOnCheckedChangeListener { _, on ->
                 if (on && android.os.Build.VERSION.SDK_INT >= 33) {
                     requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
@@ -475,7 +511,7 @@ class MainActivity : Activity() {
         signals.addView(CheckBox(this).apply {
             text = "Share my approximate location"
             isChecked = FortGuard.isLocationConsent(this@MainActivity)
-            setTextColor(INK)
+            styleCheck(this)
             setOnCheckedChangeListener { _, on ->
                 FortGuard.setLocationConsent(this@MainActivity, on)
                 if (on && !locationGranted()) {
@@ -547,7 +583,7 @@ class MainActivity : Activity() {
             signalsList.removeAllViews()
             signalValues.clear()
             signalGroups().forEach { (title, items) ->
-                signalsList.addView(text(title, 16f, INK, bold = true).apply { setPadding(0, dp(12), 0, dp(6)) })
+                signalsList.addView(eyebrow(title).apply { setPadding(0, dp(16), 0, dp(8)) })
                 val box = card()
                 items.forEachIndexed { i, (name, desc) ->
                     if (i > 0) box.addView(divider())
@@ -653,11 +689,11 @@ class MainActivity : Activity() {
         val amount = amountInput.text.toString().replace(",", "").toDoubleOrNull()
         if (account.length !in 8..40) { showError("Enter a beneficiary account of 8 to 40 characters."); return }
         if (amount == null || amount <= 0) { showError("Enter an amount greater than zero."); return }
-        checkButton.isEnabled = false
+        setBusy(true)
         showNeutral("Sending telemetry and asking FortGuard for a decision...")
         FortGuard.submit { outcome ->
             if (!outcome.ok) {
-                checkButton.isEnabled = true
+                setBusy(false)
                 showError("Telemetry not accepted: ${outcome.message}")
                 return@submit
             }
@@ -668,7 +704,7 @@ class MainActivity : Activity() {
             io.execute {
                 val result = DemoBackend.evaluate(url, key, session, userId, amount, account, newPayee.isChecked)
                 ui.post {
-                    checkButton.isEnabled = true
+                    setBusy(false)
                     result.fold(::showDecision) { showError("Evaluate failed: ${it.message}") }
                 }
             }
@@ -677,37 +713,114 @@ class MainActivity : Activity() {
 
     private fun showDecision(d: DemoBackend.Decision) {
         val level = d.level
-        val tone = levelColor(level)
-        val sb = StringBuilder()
-        sb.append("${level.replace('_', ' ')}   ${d.score} / 1000\n")
-        sb.append("${DemoBackend.ACTIONS[d.action] ?: d.action}\n\n")
-        if (d.breakdown.isEmpty()) sb.append("No risk signals fired.\n")
-        d.breakdown.forEach { (reason, points) -> sb.append("+$points  ${DemoBackend.REASONS[reason] ?: reason}\n") }
-        sb.append("\nBot ${pct(d.botProbability)}, coercion ${pct(d.coercionProbability)}, remote tool ${if (d.remoteTool) "yes" else "no"}. Scored in ${d.latencyMs} ms.")
-        resultText.text = sb.toString()
-        resultText.setTextColor(tone)
-        resultCard.background = rounded(tint(tone), 14)
+        val tone = Brand.levelColor(level)
+        val action = DemoBackend.ACTIONS[d.action] ?: d.action
+        resultCard.removeAllViews()
+        resultCard.background = rounded(CARD, 18, tone)
+
+        // Outcome: the same three screens as the product film.
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(BadgeView(this, level), LinearLayout.LayoutParams(dp(46), dp(46)))
+        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
+        titles.addView(text(outcomeTitle(level), 20f, tone, bold = true))
+        titles.addView(text(action, 13f, MUTED))
+        head.addView(titles, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        resultCard.addView(head)
+
+        val gauge = GaugeView(this)
+        resultCard.addView(gauge, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(10)
+        })
+        gauge.show(d.score)
+
+        val note = text(outcomeNote(level), 13f, INK).apply { setPadding(0, dp(4), 0, 0) }
+        resultCard.addView(note)
+        if (level == "STEP_UP") {
+            resultCard.addView(primaryButton("Confirm with fingerprint or face") {
+                FortGuard.enrolOwner(this@MainActivity) { ok, message ->
+                    note.text = if (ok) "Confirmed. A live bank app would now continue the payment. Demo only: no money moves." else message
+                    note.setTextColor(if (ok) ACCENT else WARN)
+                    if (::ownerStatus.isInitialized) ownerStatus.text = ownerLine()
+                }
+            }, lp(top = 10))
+        }
+
+        resultCard.addView(divider(), lp(top = 14, bottom = 12).apply { height = dp(1) })
+        resultCard.addView(eyebrow("Why this decision"))
+        if (d.breakdown.isEmpty()) {
+            resultCard.addView(text("No risk signals fired.", 14f, MUTED).apply { setPadding(0, dp(8), 0, 0) })
+        }
+        val most = d.breakdown.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+        d.breakdown.forEach { (reason, points) -> resultCard.addView(reasonRow(DemoBackend.REASONS[reason] ?: reason, points, most, tone)) }
+
+        resultCard.addView(divider(), lp(top = 14, bottom = 12).apply { height = dp(1) })
+        resultCard.addView(eyebrow("Learning model"))
+        resultCard.addView(text(modelLine(d), 14f, if (d.mlAnomalous) WARN else INK).apply { setPadding(0, dp(8), 0, 0) })
+        if (d.mlStatus == "LEARNING") {
+            resultCard.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = d.mlRequired.coerceAtLeast(1)
+                progress = d.mlSessions.coerceIn(0, max)
+                progressTintList = ColorStateList.valueOf(ACCENT)
+            }, lp(top = 8))
+        }
+        resultCard.addView(text("Bot ${pct(d.botProbability)} · coercion ${pct(d.coercionProbability)} · remote tool ${if (d.remoteTool) "yes" else "no"} · scored in ${d.latencyMs} ms",
+            12f, MUTED).apply { setPadding(0, dp(14), 0, 0) })
+
         if (::homeDecision.isInitialized) {
-            homeDecision.text = "${level.replace('_', ' ')} (score ${d.score}). ${DemoBackend.ACTIONS[d.action] ?: d.action}"
+            homeDecision.text = "${level.replace('_', ' ')} · score ${d.score} of 1000\n$action"
             homeDecision.setTextColor(tone)
         }
+        if (::homeModel.isInitialized) {
+            homeModel.text = modelLine(d)
+            homeModel.setTextColor(if (d.mlAnomalous) WARN else INK)
+        }
+    }
+
+    private fun outcomeTitle(level: String) = when (level) {
+        "ALLOW" -> "Payment approved"
+        "STEP_UP" -> "Confirm it is you"
+        else -> "Payment stopped"
+    }
+
+    private fun outcomeNote(level: String) = when (level) {
+        "ALLOW" -> "No extra steps for the customer. Demo only: no money moves."
+        "STEP_UP" -> "FortGuard asks for stronger proof before the payment continues."
+        else -> "A live bank app would end the session and alert the fraud team. Demo only: no money moves."
+    }
+
+    /** What the server's machine-learning model said about this session, in plain words. */
+    private fun modelLine(d: DemoBackend.Decision) = when (d.mlStatus) {
+        "ACTIVE" -> if (d.mlAnomalous) "This session is unlike your usual ones." else "This session fits your usual pattern."
+        "LEARNING" -> "Still learning how you use the app: ${d.mlSessions} of ${d.mlRequired} sessions."
+        else -> "This session was not scored by the model."
+    }
+
+    /** One reason with its points and a bar sized against the largest reason. */
+    private fun reasonRow(label: String, points: Int, most: Int, tone: Int): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
+        val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        line.addView(text(label, 14f, INK), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        line.addView(text("+$points", 13f, tone, bold = true).apply { setPadding(dp(10), 0, 0, 0) })
+        box.addView(line)
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(Brand.FIELD, 3) }
+        val filled = points.coerceIn(1, most).toFloat()
+        bar.addView(View(this).apply { background = rounded(tone, 3) }, LinearLayout.LayoutParams(0, dp(5), filled))
+        bar.addView(View(this), LinearLayout.LayoutParams(0, dp(5), (most - filled).coerceAtLeast(0f)))
+        box.addView(bar, lp(top = 6))
+        return box
     }
 
     private fun showError(message: String) = showNeutral(message, DANGER)
 
     private fun showNeutral(message: String, color: Int = MUTED) {
-        resultText.text = message
-        resultText.setTextColor(color)
-        resultCard.background = rounded(CARD, 14)
+        resultCard.removeAllViews()
+        resultCard.background = rounded(CARD, 18, if (color == DANGER) DANGER else Brand.LINE)
+        resultCard.addView(text(message, 14f, color))
     }
 
-    private fun levelColor(level: String) = when (level) {
-        "ALLOW" -> OK
-        "STEP_UP" -> WARN
-        else -> DANGER
-    }
-
-    private fun tint(c: Int): Int = Color.argb(28, Color.red(c), Color.green(c), Color.blue(c))
+    private fun firstName(): String =
+        prefs.getString("name", DEMO_NAME)!!.trim().substringBefore(' ').ifEmpty { DEMO_USER }
 
     private fun pct(v: Double) = "${Math.round(v * 100)}%"
 
@@ -767,19 +880,66 @@ class MainActivity : Activity() {
         text = t
         textSize = 13f
         setTextColor(MUTED)
-        setPadding(0, dp(10), 0, dp(2))
+        setPadding(0, dp(12), 0, dp(4))
+    }
+
+    /** Small spaced capitals in the accent colour, the section label used across the app and the back office. */
+    private fun eyebrow(t: String) = TextView(this).apply {
+        text = t.uppercase()
+        textSize = 11f
+        letterSpacing = 0.16f
+        setTextColor(ACCENT)
+        setTypeface(typeface, Typeface.BOLD)
+    }
+
+    /** "FortGuard" with the second half in the accent colour. */
+    private fun wordmark(size: Float) = TextView(this).apply {
+        val mark = SpannableString("FortGuard")
+        mark.setSpan(ForegroundColorSpan(ACCENT), 4, 9, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        text = mark
+        textSize = size
+        setTextColor(INK)
+        setTypeface(typeface, Typeface.BOLD)
+    }
+
+    private fun byline() = TextView(this).apply {
+        text = "BY FORTANIXOR"
+        textSize = 10f
+        letterSpacing = 0.3f
+        setTextColor(MUTED)
+        setTypeface(typeface, Typeface.BOLD)
+    }
+
+    /** Shield, wordmark and byline in one row, for the top of a screen. */
+    private fun brandHeader(): View {
+        val rowView = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        rowView.addView(ShieldView(this), LinearLayout.LayoutParams(dp(34), dp(38)))
+        val names = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
+        names.addView(wordmark(22f))
+        names.addView(byline())
+        rowView.addView(names)
+        return rowView
+    }
+
+    private fun styleCheck(box: CheckBox) {
+        box.setTextColor(INK)
+        box.buttonTintList = ColorStateList.valueOf(ACCENT)
+    }
+
+    private fun setBusy(busy: Boolean) {
+        checkButton.isEnabled = !busy
+        checkButton.alpha = if (busy) 0.5f else 1f
     }
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(CARD, 14)
-        setPadding(dp(16), dp(16), dp(16), dp(16))
-        elevation = dp(2).toFloat()
+        background = rounded(CARD, 18, Brand.LINE)
+        setPadding(dp(18), dp(18), dp(18), dp(18))
     }
 
     private fun column() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(16), dp(16), dp(24))
+        setPadding(dp(18), dp(20), dp(18), dp(28))
     }
 
     private fun scroll(child: View): View = ScrollView(this).apply {
@@ -792,24 +952,27 @@ class MainActivity : Activity() {
         inputType = type
         setSingleLine(true)
         setTextColor(INK)
-        setHintTextColor(Color.rgb(160, 168, 178))
-        background = rounded(Color.rgb(248, 250, 253), 10, Color.rgb(200, 208, 220))
-        setPadding(dp(12), dp(10), dp(12), dp(10))
+        setHintTextColor(Color.rgb(96, 112, 134))
+        background = rounded(Brand.FIELD, 12, Brand.LINE)
+        setPadding(dp(14), dp(12), dp(14), dp(12))
     }
 
     private fun primaryButton(t: String, onClick: () -> Unit) = Button(this).apply {
         text = t
         isAllCaps = false
-        setTextColor(Color.WHITE)
-        background = rounded(PRIMARY, 12)
+        setTextColor(Brand.ON_ACCENT)
+        setTypeface(typeface, Typeface.BOLD)
+        background = rounded(ACCENT, 14)
+        stateListAnimator = null
         setOnClickListener { onClick() }
     }
 
     private fun outlineButton(t: String, onClick: () -> Unit) = Button(this).apply {
         text = t
         isAllCaps = false
-        setTextColor(PRIMARY)
-        background = rounded(CARD, 12, PRIMARY)
+        setTextColor(INK)
+        background = rounded(Color.TRANSPARENT, 14, Brand.LINE)
+        stateListAnimator = null
         setOnClickListener { onClick() }
     }
 
@@ -822,7 +985,7 @@ class MainActivity : Activity() {
     }
 
     private fun divider() = View(this).apply {
-        setBackgroundColor(Color.rgb(230, 234, 240))
+        setBackgroundColor(Brand.LINE)
         layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(1))
     }
 
