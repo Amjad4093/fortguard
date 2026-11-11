@@ -56,6 +56,12 @@ APK. See **android/BUILD_AND_TEST.md** for building in Android Studio, installin
 The SDK's core was compiled and tested against this server; the Android-specific parts still need their first
 real build.
 
+**Sessions.** Call `FortGuard.newSession()` when the customer signs in and after each decision, as the demo
+does. The server learns one row per session and keeps at most 50,000 touch, typing and motion events for one,
+so an app that never starts a new session stops being measured after a few minutes and its customer's
+profile never becomes ready. The response's `identity` block answers "is this the account holder?":
+`LEARNING` for the first 10 allowed sessions, then `OWNER_LIKELY` or `NOT_OWNER_LIKELY`.
+
 ## Try it: analyst portal and phone test page
 
 ```bash

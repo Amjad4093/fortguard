@@ -10,6 +10,13 @@
   },
   "degraded": false,
   "deny_list": [],
+  "identity": {
+    "match_score": null,
+    "required": 10,
+    "sessions": 0,
+    "text": "Still learning this customer: 0 of 10 sessions. FortGuard cannot tell the account holder from anyone else until 10 more allowed sessions.",
+    "verdict": "LEARNING"
+  },
   "latency_ms": 0.0,
   "ml": {
     "anomalous": false,

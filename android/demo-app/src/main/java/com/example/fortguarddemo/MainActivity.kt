@@ -260,6 +260,7 @@ class MainActivity : Activity() {
         // Tells FortGuard which customer is using this phone, so their time in the app and name reach the back office.
         FortGuard.identify(this, userId(), name)
         prefs.edit().putString("name", name).apply()
+        FortGuard.newSession()   // a sign-in starts a fresh session
         loggedIn = true
         loginPassword.setText("")
         loginError.text = ""
@@ -362,8 +363,8 @@ class MainActivity : Activity() {
         col.addView(decision, lp(bottom = 14))
 
         val model = card()
-        model.addView(eyebrow("Learning model"))
-        homeModel = text("FortGuard learns how you use the app. Check a transfer to see how far it has got.", 14f, MUTED).apply { setPadding(0, dp(8), 0, 0) }
+        model.addView(eyebrow("Who is using the app"))
+        homeModel = text("FortGuard learns how you use the app over your first 10 payment checks. After that it says whether each session looks like you or like someone else.", 14f, MUTED).apply { setPadding(0, dp(8), 0, 0) }
         model.addView(homeModel)
         col.addView(model, lp(bottom = 16))
 
@@ -723,8 +724,10 @@ class MainActivity : Activity() {
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(BadgeView(this, level), LinearLayout.LayoutParams(dp(46), dp(46)))
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
-        titles.addView(text(outcomeTitle(level), 20f, tone, bold = true))
-        titles.addView(text(action, 13f, MUTED))
+        val titleView = text(outcomeTitle(level), 20f, tone, bold = true)
+        val actionView = text(action, 13f, MUTED)
+        titles.addView(titleView)
+        titles.addView(actionView)
         head.addView(titles, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         resultCard.addView(head)
 
@@ -738,13 +741,45 @@ class MainActivity : Activity() {
         val note = text(outcomeNote(level), 13f, INK).apply { setPadding(0, dp(4), 0, 0) }
         resultCard.addView(note)
         if (level == "STEP_UP") {
-            resultCard.addView(primaryButton("Confirm with fingerprint or face") {
+            lateinit var confirm: Button
+            confirm = primaryButton("Confirm with fingerprint or face") {
                 FortGuard.enrolOwner(this@MainActivity) { ok, message ->
-                    note.text = if (ok) "Confirmed. A live bank app would now continue the payment. Demo only: no money moves." else message
-                    note.setTextColor(if (ok) ACCENT else WARN)
-                    if (::ownerStatus.isInitialized) ownerStatus.text = ownerLine()
+                    // The callback can arrive on another thread; everything below touches the screen.
+                    ui.post {
+                        if (ok) {
+                            // Make the result unmistakable: the whole card turns to the approved state.
+                            head.removeViewAt(0)
+                            head.addView(BadgeView(this@MainActivity, "ALLOW"), 0, LinearLayout.LayoutParams(dp(46), dp(46)))
+                            titleView.text = "Identity confirmed"
+                            titleView.setTextColor(ACCENT)
+                            actionView.text = "Payment approved after the fingerprint or face check"
+                            resultCard.background = rounded(CARD, 18, ACCENT)
+                            note.text = "A live bank app would now send the payment. Demo only: no money moves."
+                            note.setTextColor(ACCENT)
+                            confirm.visibility = View.GONE
+                            toast("Identity confirmed. Payment approved.")
+                            FortGuard.flush()   // the proof travels with the next batch
+                        } else {
+                            note.text = "Not confirmed: $message"
+                            note.setTextColor(WARN)
+                            toast("Not confirmed: $message")
+                        }
+                        if (::ownerStatus.isInitialized) ownerStatus.text = ownerLine()
+                    }
                 }
-            }, lp(top = 10))
+            }
+            resultCard.addView(confirm, lp(top = 10))
+        }
+
+        resultCard.addView(divider(), lp(top = 14, bottom = 12).apply { height = dp(1) })
+        resultCard.addView(eyebrow("Who is using the app"))
+        resultCard.addView(text(d.identityText, 14f, identityColor(d)).apply { setPadding(0, dp(8), 0, 0) })
+        if (d.identity == "LEARNING") {
+            resultCard.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = d.identityRequired.coerceAtLeast(1)
+                progress = d.identitySessions.coerceIn(0, max)
+                progressTintList = ColorStateList.valueOf(ACCENT)
+            }, lp(top = 8))
         }
 
         resultCard.addView(divider(), lp(top = 14, bottom = 12).apply { height = dp(1) })
@@ -773,9 +808,18 @@ class MainActivity : Activity() {
             homeDecision.setTextColor(tone)
         }
         if (::homeModel.isInitialized) {
-            homeModel.text = modelLine(d)
-            homeModel.setTextColor(if (d.mlAnomalous) WARN else INK)
+            homeModel.text = d.identityText
+            homeModel.setTextColor(identityColor(d))
         }
+        // Each payment check is its own session: the server learns one row per session, and a session
+        // has a size limit, so one never-ending session would stop the profile from ever being ready.
+        FortGuard.newSession()
+    }
+
+    private fun identityColor(d: DemoBackend.Decision) = when (d.identity) {
+        "OWNER_LIKELY" -> ACCENT
+        "NOT_OWNER_LIKELY" -> DANGER
+        else -> INK
     }
 
     private fun outcomeTitle(level: String) = when (level) {

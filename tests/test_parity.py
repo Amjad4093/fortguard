@@ -256,3 +256,49 @@ def test_half_a_tap_offset_is_refused(api, make_session):
     s["batches"][0] = s["device"].sign(payload)
     with pytest.raises(RuntimeError, match="telemetry rejected: 400"):
         run_session(api, s)
+
+
+# --- Other sensors, long sessions and the identity verdict ------------------------------------------
+
+def test_other_sensors_keep_their_own_room_in_a_long_session(api, admin, make_session, monkeypatch):
+    """The fault this replaces: motion data filled the session and the other sensors were dropped."""
+    from fortguard import config
+    monkeypatch.setattr(config, "MAX_EVENTS_PER_SESSION", 50)     # the session fills up in its first batch
+    s = make_session("genuine", 30)
+    last = copy.deepcopy({k: v for k, v in s["batches"][-1].items() if k != "signature"})
+    ts = last["timestamp_ms"]
+    last["sensor_data"]["light"] = [{"x": 12000.0, "y": 0.0, "z": 0.0, "ts": ts}, {"x": 14000.0, "y": 0.0, "z": 0.0, "ts": ts + 50}]
+    last["sensor_data"]["pressure"] = [{"x": 1013.2, "y": 0.0, "z": 0.0, "ts": ts}]
+    last["sensor_data"]["magnetometer"] = [{"x": 30.0, "y": 0.0, "z": 40.0, "ts": ts}]
+    s["batches"][-1] = s["device"].sign(last)
+    assert run_session(api, s)[0] == 200
+    shown = admin.call("get", "/v1/bo/decisions")[1]["decisions"][0]
+    assert shown["captured"]["light"] == 2 and shown["captured"]["pressure"] == 1 and shown["captured"]["magnetometer"] == 1
+    assert shown["sensor_summary"] == {"light_lux": 13000.0, "pressure_hpa": 1013.2, "magnetic_field_ut": 50.0}
+
+
+def test_sensor_readings_are_summarised_in_plain_units():
+    from fortguard import features
+    extra = {"light": [{"x": 12000.0, "y": 0, "z": 0, "ts": 1}, {"x": 14000.0, "y": 0, "z": 0, "ts": 2}],
+             "proximity": [{"x": 0.0, "y": 0, "z": 0, "ts": 1}, {"x": 5.0, "y": 0, "z": 0, "ts": 2}],
+             "pressure": [{"x": 1013.2, "y": 0, "z": 0, "ts": 1}],
+             "magnetometer": [{"x": 30.0, "y": 0.0, "z": 40.0, "ts": 1}]}
+    assert features.sensor_summary(extra) == {"light_lux": 13000.0, "covered_share": 0.5, "pressure_hpa": 1013.2, "magnetic_field_ut": 50.0}
+    assert features.sensor_summary({}) == {}
+
+
+def test_identity_says_learning_until_the_profile_is_ready_then_owner(api, make_session):
+    seen = []
+    for i in range(11):
+        s = make_session("genuine", 100 + i)
+        s["evaluate"]["user_id"] = "usr_identity01"
+        seen.append(run_session(api, s)[1]["identity"])
+    assert seen[0]["verdict"] == "LEARNING" and seen[0]["sessions"] == 0 and "0 of 10" in seen[0]["text"]
+    assert seen[5]["verdict"] == "LEARNING" and seen[5]["sessions"] == 5
+    assert seen[10]["verdict"] == "OWNER_LIKELY" and seen[10]["match_score"] is not None, seen[10]
+
+
+def test_identity_is_unknown_without_behaviour(api):
+    status, body = api.post("/v1/risk/evaluate", {
+        "session_id": "sess_never_seen_2", "user_id": "usr_nobody0001", "event_type": "LOGIN", "allow_degraded": True}, auth=True)
+    assert status == 200 and body["identity"]["verdict"] == "UNKNOWN"

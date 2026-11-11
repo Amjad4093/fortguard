@@ -206,6 +206,6 @@ internal class MotionCapture(context: Context, private val buffer: EventBuffer) 
         const val PERIOD_US = 20_000
         const val MIN_GAP_MS = 18L
         // Slower sensors (light, proximity, pressure) report on change; this keeps any one from flooding.
-        const val MIN_GAP_EXTRA_MS = 50L
+        const val MIN_GAP_EXTRA_MS = 200L   // 5 a second: these sensors are summarised, not analysed sample by sample
     }
 }

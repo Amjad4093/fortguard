@@ -23,7 +23,7 @@ from flask import abort, current_app, jsonify, request, send_from_directory
 
 from . import config
 from .attestation import DEV_AUTHORITY, LEVELS
-from .features import typing_totals
+from .features import sensor_summary, typing_totals
 from .schema import ENV_BOOLS, ENV_EXTRA_NUMBERS, ID_RE, ValidationFailure
 
 WEB_DIR = pathlib.Path(__file__).parent / "web"
@@ -127,6 +127,7 @@ class DecisionLog:
             "features": {k: round(float(v), 4) for k, v in (features or {}).items()
                          if isinstance(v, (int, float)) and not isinstance(v, bool)},
             "captured": captured_counts(session),
+            "sensor_summary": sensor_summary(getattr(session, "extra", None) or {}),
             "typing": dict(zip(("typed_chars", "corrected_chars", "active_ms"), _typing(session))),
             "touch_grid": touch_grid(session),
             "environment": {k: env[k] for k in ENV_SHOWN if k in env},

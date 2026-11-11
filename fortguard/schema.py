@@ -248,8 +248,9 @@ def validate_telemetry(p):
         for s in samples:
             if not isinstance(s, dict) or set(s) != SENSOR_KEYS:
                 _fail("invalid_request", f"{name} samples need exactly x, y, z and ts")
+            limit = config.EXTRA_SENSOR_LIMIT if name in config.EXTRA_SENSORS else 1000
             for axis in ("x", "y", "z"):
-                _need_num(s[axis], f"{name} {axis}", -1000, 1000)
+                _need_num(s[axis], f"{name} {axis}", -limit, limit)
             _need_num(s["ts"], f"{name} ts", 1)
     return p
 

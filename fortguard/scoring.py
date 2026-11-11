@@ -30,6 +30,34 @@ COERCION_REASONS = (
 )
 
 
+def identity_verdict(baseline, ml, feats):
+    """One plain answer to "is this the account holder?", from the customer's profile and the ML model.
+
+    It is a judgement from behaviour, never proof: OWNER_LIKELY means this session looks like the
+    sessions the profile was learned from, and NOT_OWNER_LIKELY means it does not. While the profile is
+    still learning nobody can be told apart, and the answer says so instead of guessing.
+    """
+    required = config.BASELINE_MIN_SESSIONS
+    if feats is None:
+        return {"verdict": "UNKNOWN", "sessions": 0, "required": required, "match_score": None,
+                "text": "No behaviour was measured in this session, so FortGuard cannot say who is using the app."}
+    status = (baseline or {}).get("status", "NONE")
+    sessions = (baseline or {}).get("sessions", 0)
+    match = (baseline or {}).get("match_score")
+    if status != "MATURE":
+        left = max(0, required - sessions)
+        return {"verdict": "LEARNING", "sessions": sessions, "required": required, "match_score": None,
+                "text": f"Still learning this customer: {sessions} of {required} sessions. FortGuard cannot tell the "
+                        f"account holder from anyone else until {left} more allowed session{'s' if left != 1 else ''}."}
+    unlike = (match is not None and match < config.BASELINE_ANOMALY_BELOW) or bool((ml or {}).get("anomalous"))
+    if unlike:
+        return {"verdict": "NOT_OWNER_LIKELY", "sessions": sessions, "required": required, "match_score": match,
+                "text": "This session does not look like the account holder. The typing, touch or movement is unlike "
+                        f"the {sessions} sessions this customer's profile was learned from."}
+    return {"verdict": "OWNER_LIKELY", "sessions": sessions, "required": required, "match_score": match,
+            "text": f"This session looks like the account holder. It matches the profile learned from {sessions} sessions."}
+
+
 def level_for(score, event_type):
     bands = config.bands_for(event_type)
     if score >= bands["block_from"]:
@@ -197,6 +225,7 @@ def score_session(session, event_type, tx, baselines=None, user_id=None, denied=
         "baseline": baseline or {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
                                  "match_score": None, "match_score_preview": None, "least_typical_features": []},
         "ml": ml or mlmodel.EMPTY,
+        "identity": identity_verdict(baseline, ml, feats),
         "score_breakdown": breakdown,
         "signals_used": "ENVIRONMENT_AND_BEHAVIOR" if feats is not None else "ENVIRONMENT_ONLY",
         # RULES_AND_ML only when the model was mature enough to give an opinion on this session.
@@ -292,6 +321,7 @@ def degraded_decision(event_type, tx, reason, denied=()):
         "baseline": {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
                      "match_score": None, "match_score_preview": None, "least_typical_features": []},
         "ml": mlmodel.EMPTY,
+        "identity": identity_verdict(None, None, None),
         "signals_used": "TRANSACTION_ONLY",
         "scoring_mode": "DEGRADED",
         "model_version": config.MODEL_VERSION,

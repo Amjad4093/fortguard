@@ -121,14 +121,14 @@ class EventBuffer(
         synchronized(this) {
             val list = extra.getOrPut(name) { ArrayList() }
             if (totals[4] >= maxExtraSensor) { dropped++; return }
-            list.add(sample(x, y, z, ts))
+            list.add(sample(x, y, z, ts, EXTRA_LIMIT))
             totals[4]++
             bump(name)
         }
     }
 
-    private fun sample(x: Double, y: Double, z: Double, ts: Long) = mapOf(
-        "x" to x.coerceIn(-999.0, 999.0), "y" to y.coerceIn(-999.0, 999.0), "z" to z.coerceIn(-999.0, 999.0), "ts" to ts,
+    private fun sample(x: Double, y: Double, z: Double, ts: Long, limit: Double = 999.0) = mapOf(
+        "x" to x.coerceIn(-limit, limit), "y" to y.coerceIn(-limit, limit), "z" to z.coerceIn(-limit, limit), "ts" to ts,
     )
 
     class Drained(
@@ -164,4 +164,9 @@ class EventBuffer(
 
     /** Lifetime characters typed and corrected (counts only). */
     fun typing(): Pair<Long, Long> = synchronized(this) { Pair(typedChars, correctedChars) }
+
+    companion object {
+        /** Light reaches about 100,000 lux and air pressure is about 1013 hPa, so these need more room than motion. */
+        const val EXTRA_LIMIT = 200_000.0
+    }
 }

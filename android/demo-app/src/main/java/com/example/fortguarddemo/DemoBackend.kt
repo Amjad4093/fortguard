@@ -25,6 +25,11 @@ object DemoBackend {
         val mlSessions: Int,
         val mlRequired: Int,
         val mlAnomalous: Boolean,
+        /** The server's answer to "is this the account holder?": OWNER_LIKELY, NOT_OWNER_LIKELY, LEARNING or UNKNOWN. */
+        val identity: String,
+        val identityText: String,
+        val identitySessions: Int,
+        val identityRequired: Int,
     )
 
     fun evaluate(
@@ -47,6 +52,7 @@ object DemoBackend {
         val b = r.body
         val threat = b["threat_details"] as? Map<*, *> ?: emptyMap<String, Any?>()
         val ml = b["ml"] as? Map<*, *> ?: emptyMap<String, Any?>()
+        val who = b["identity"] as? Map<*, *> ?: emptyMap<String, Any?>()
         val breakdown = (b["score_breakdown"] as? List<*>).orEmpty().mapNotNull { item ->
             val m = item as? Map<*, *> ?: return@mapNotNull null
             (m["reason"] as? String ?: return@mapNotNull null) to ((m["points"] as? Number)?.toInt() ?: 0)
@@ -64,6 +70,10 @@ object DemoBackend {
             mlSessions = (ml["sessions"] as? Number)?.toInt() ?: 0,
             mlRequired = (ml["required"] as? Number)?.toInt() ?: 10,
             mlAnomalous = ml["anomalous"] == true,
+            identity = who["verdict"] as? String ?: "UNKNOWN",
+            identityText = who["text"] as? String ?: "The server did not say who is using the app. Update the server.",
+            identitySessions = (who["sessions"] as? Number)?.toInt() ?: 0,
+            identityRequired = (who["required"] as? Number)?.toInt() ?: 10,
         )
     }
 

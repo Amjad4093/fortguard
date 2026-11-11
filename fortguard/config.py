@@ -136,6 +136,11 @@ NETWORK_TYPES = ("wifi", "cellular", "ethernet", "none", "other")
 LOCATION_JUMP_MIN_KM = 50
 LOCATION_MAX_KMH = 900  # faster than a passenger jet on the ground-to-ground leg
 MAX_EVENTS_PER_SESSION = 50_000
+# The other sensors (light, proximity, magnetometer and the rest) have their own allowance, so a long
+# session's motion data can never crowd them out, and they can never crowd out touch, typing or motion.
+MAX_EXTRA_PER_SESSION = 20_000
+EXTRA_SENSOR_LIMIT = 200_000      # light reaches about 100,000 lux in sunlight; air pressure is about 1013 hPa
+PROXIMITY_NEAR_CM = 1.0           # a proximity reading below this means something is against the screen
 MAX_IDEMPOTENCY_ENTRIES = 100_000
 
 TREMOR_WINDOW = 512  # most recent accelerometer samples used for the tremor feature (about 10 s at 50 Hz)

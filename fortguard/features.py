@@ -256,6 +256,35 @@ def field_times(marks):
     return totals, stays
 
 
+def sensor_summary(extra):
+    """Plain readings from the sensors that are not scored, for the bank to see: what the phone's
+    surroundings were like during the session. A sensor that sent nothing is left out.
+
+    None of these changes a score. There is no data from real phones yet to say what is unusual.
+    """
+    out = {}
+
+    def xs(name):
+        return [s["x"] for s in extra.get(name) or []]
+
+    def strength(name):
+        samples = extra.get(name) or []
+        return statistics.fmean(math.sqrt(s["x"] ** 2 + s["y"] ** 2 + s["z"] ** 2) for s in samples) if samples else None
+
+    light, near, pressure = xs("light"), xs("proximity"), xs("pressure")
+    if light:
+        out["light_lux"] = round(statistics.fmean(light), 1)
+    if near:
+        out["covered_share"] = round(sum(1 for v in near if v < config.PROXIMITY_NEAR_CM) / len(near), 2)
+    if pressure:
+        out["pressure_hpa"] = round(statistics.fmean(pressure), 1)
+    for name, key in (("magnetometer", "magnetic_field_ut"), ("gravity", "gravity_ms2"), ("linear_acceleration", "movement_ms2")):
+        value = strength(name)
+        if value is not None:
+            out[key] = round(value, 2)
+    return out
+
+
 def hesitation_marks(keys, ui):
     """(time, is_submit) for every event that matters to hesitation, unsorted.
 

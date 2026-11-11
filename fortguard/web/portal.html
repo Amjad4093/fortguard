@@ -692,9 +692,19 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       return el("div", { class: "sig " + (n ? "on" : "off"), title: s[2] }, [el("span", { class: "dot" }), el("div", {}, [
         el("b", { text: s[1] }), el("small", { text: n ? n.toLocaleString() + " samples" : "No samples" })])]);
     }));
+    var r = d.sensor_summary || {};
+    var readings = kvList([
+      ["Light around the phone", r.light_lux != null ? r.light_lux.toLocaleString() + " lux" : null],
+      ["Screen covered (in a pocket or at the ear)", r.covered_share != null ? Math.round(r.covered_share * 100) + "% of the time" : null],
+      ["Magnetic field", r.magnetic_field_ut != null ? r.magnetic_field_ut + " µT" : null],
+      ["Air pressure", r.pressure_hpa != null ? r.pressure_hpa.toLocaleString() + " hPa" : null],
+      ["Gravity measured", r.gravity_ms2 != null ? r.gravity_ms2 + " m/s²" : null],
+      ["Movement besides gravity", r.movement_ms2 != null ? r.movement_ms2 + " m/s²" : null]]);
     return card("Signals captured", [
       el("p", { class: "hint", text: on + " of " + SIGNALS.length + " signals delivered data for this decision." }), grid,
-      el("p", { class: "hint", text: "“No samples” means the phone sent nothing for that signal. The phone may not have the sensor, or the app may have been in the background or blocked." })
+      el("p", { class: "hint", text: "“No samples” means the phone sent nothing for that signal. The phone may not have the sensor, or the app may have been in the background or blocked." }),
+      readings ? el("div", { class: "sub", text: "Readings from the other sensors" }) : null, readings,
+      el("p", { class: "hint", text: "Scored today: touch, typing, accelerometer and gyroscope. The other sensors are recorded and shown here; they change no score until there is data from real phones to say what is unusual." })
     ]);
   }
 

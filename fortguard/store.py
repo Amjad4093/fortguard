@@ -53,8 +53,11 @@ class Session:
     location_jump: bool = False  # sticky: the phone was somewhere physically impossible within this session
 
     def event_count(self):
-        return (len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
-                + sum(len(v) for v in self.extra.values()))
+        """Touch, typing and motion events held. The other sensors are counted apart, see extra_count."""
+        return len(self.touch) + len(self.keys) + len(self.ui) + len(self.accel) + len(self.gyro)
+
+    def extra_count(self):
+        return sum(len(v) for v in self.extra.values())
 
 
 class SessionStore:
@@ -129,12 +132,13 @@ class SessionStore:
                     added[attr] = items
                     kept["sensor"] += len(items)
                     room -= len(items)
+                extra_room = max(0, config.MAX_EXTRA_PER_SESSION - session.extra_count())
                 for name in config.EXTRA_SENSORS:
-                    items = sensors.get(name, [])[:room]
+                    items = sensors.get(name, [])[:extra_room]
                     if items:
                         session.extra.setdefault(name, []).extend(items)
                     kept["sensor"] += len(items)
-                    room -= len(items)
+                    extra_room -= len(items)
                 if session.fstate is None:
                     session.fstate = FeatureState()
                 session.fstate.update(added["touch"], added["keys"], added["ui"], added["accel"], added["gyro"])
