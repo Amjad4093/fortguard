@@ -79,6 +79,27 @@ Find the computer's address: Windows `ipconfig` (IPv4 Address), macOS `ipconfig 
 | **Last batch** | the exact JSON sent: key events hold only type, time and field, never characters |
 | **Revoke** the device in the portal's Devices tab | the app's next upload is refused (tap **Reset device** to start over) |
 
+## Phone checklist for the latest build
+
+Each line is something the code is meant to do but nobody has yet seen on a real phone. Tick it or note what
+happened instead; a screenshot of the result card or the portal page is the most useful report.
+
+1. **Same device after reinstall.** Note the Device and Customer ids on the Signals screen, uninstall,
+   install the same APK again. Both ids should match, and the portal's Devices page should say "Enrolled 2 times".
+2. **No false "long pauses".** Sign in, browse for half a minute, then type a payment at a normal pace and
+   check it. "Long pauses" should not be among the reasons.
+3. **Fingerprint on a step-up.** Get a STEP-UP (tick "New beneficiary" and stay on a call), tap "Confirm with
+   fingerprint or face". On success the whole card turns green and says "Identity confirmed".
+4. **Every sensor arrives.** After a check, open the decision in the portal. "Signals captured" should show
+   samples for each sensor the phone has, and "Readings from the other sensors" should show light and the rest.
+5. **A long session keeps its sensors.** Leave the app open on one screen for 10 minutes, then check a payment.
+   The sensors should still show samples (the SDK starts a new session before the old one fills up).
+6. **Who is using the app.** Do 10 allowed payment checks as yourself. The card should count "1 of 10" up to
+   "10 of 10", then say "looks like the account holder". Hand the phone to someone else for the 11th: the
+   answer should change, though a few sessions are not proof either way.
+7. **Calls.** Allow call detection in Settings, make a normal call, check a payment during it. "Call in
+   progress" should be a reason and the portal should show the direction and duration.
+
 ## Troubleshooting
 
 | Message | Fix |

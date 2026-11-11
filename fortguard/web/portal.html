@@ -809,6 +809,16 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   }
 
   // Owner profile: does this session match the profile learned from the customer's allowed sessions?
+  // The server's answer to "is this the account holder?", as a short pill with the full sentence on hover.
+  var IDENTITY = { OWNER_LIKELY: ["ALLOW", "Looks like the owner"], NOT_OWNER_LIKELY: ["BLOCK", "Not like the owner"],
+    LEARNING: ["GREY", "Learning"], UNKNOWN: ["GREY", "Unknown"] };
+  function identityPill(i) {
+    if (!i) return el("span", { class: "muted", text: "–", title: "Decided before the server reported this." });
+    var p = IDENTITY[i.verdict] || ["GREY", i.verdict];
+    var label = i.verdict === "LEARNING" ? p[1] + " " + i.sessions + "/" + i.required : p[1];
+    var out = pill(p[0], label); out.title = i.text; return out;
+  }
+
   function ownerCallout(d) {
     var b = d.baseline || {};
     var pct = b.match_score != null ? Math.round(b.match_score * 100) + "%" : null;
@@ -1009,9 +1019,10 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var rows = data.decisions.map(function (d) {
       return el("tr", {}, [el("td", { text: when(d.time_ms) }), el("td", { text: short(d.session_id, 16) }), el("td", { text: d.user_id }), el("td", { text: d.event_type.replace(/_/g, " ").toLowerCase() }),
         el("td", { text: money(d.amount, d.currency) }), el("td", { text: String(d.risk_score) }), el("td", {}, [pill(d.risk_level)]),
+        el("td", {}, [identityPill(d.identity)]),
         el("td", { text: d.score_breakdown.length ? reasonText(d.score_breakdown[0].reason) : "–" }), el("td", { text: d.latency_ms + " ms" })]);
     });
-    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Time", "Session", "User", "Event", "Amount", "Score", "Decision", "Top reason", "Scoring"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+    v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Time", "Session", "User", "Event", "Amount", "Score", "Decision", "Account holder?", "Top reason", "Scoring"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
       rows.length ? null : el("div", { class: "empty", text: "No decisions yet." })]));
   }
 

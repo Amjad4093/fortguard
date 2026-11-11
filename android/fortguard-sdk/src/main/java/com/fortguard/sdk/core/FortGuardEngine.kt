@@ -62,15 +62,44 @@ class FortGuardEngine(
     private var seq = 0
     private val lock = Any()
 
+    // For starting a new session on its own when the app does not: touch, typing and motion events sent
+    // in this session, and when the last batch with data went out.
+    private var sessionEvents = 0
+    private var lastSentMs = 0L
+
     data class Outcome(val ok: Boolean, val message: String, val response: ApiClient.Response? = null)
 
     val publicKeyB64: String get() = b64url(key.publicKeySpki)
 
     fun newSession(): String = synchronized(lock) {
-        sessionId = Ids.random("sess_", 16)
-        seq = 0
+        startSession()
         buffer.clear()
         sessionId
+    }
+
+    /** A new session id; whatever is buffered goes into it. */
+    private fun startSession() {
+        sessionId = Ids.random("sess_", 16)
+        seq = 0
+        sessionEvents = 0
+    }
+
+    /**
+     * Starts a new session before this batch when the old one has gone quiet or is nearly full, so an app
+     * that never calls newSession() still gets sessions the server can keep and learn from. The server
+     * forgets a session after 30 minutes without data and keeps at most 50,000 of these events in one.
+     */
+    internal fun rotateIfNeeded(d: EventBuffer.Drained, now: Long) {
+        val events = d.touch.size + d.keys.size + d.ui.size + d.accel.size + d.gyro.size
+        val started = sessionEvents > 0
+        val idle = started && lastSentMs > 0 && now - lastSentMs >= IDLE_NEW_SESSION_MS
+        val full = started && sessionEvents + events > SESSION_EVENT_BUDGET
+        if (idle || full) {
+            log(if (idle) "new session: the last one went quiet" else "new session: the last one was nearly full")
+            startSession()
+        }
+        sessionEvents += events
+        lastSentMs = now
     }
 
     /** Challenge, attestation, enrollment. Re-run with force=true after the level changes. */
@@ -98,6 +127,7 @@ class FortGuardEngine(
     fun flush(force: Boolean = false): Outcome = synchronized(lock) {
         val drained = buffer.drain()
         if (drained.isEmpty && !force) return Outcome(true, "nothing to send")
+        if (!drained.isEmpty) rotateIfNeeded(drained, clock())
         if (enrolledLevel == null) {
             val e = enroll()
             if (!e.ok) return e
@@ -216,6 +246,10 @@ class FortGuardEngine(
     }
 
     companion object {
+        /** Shorter than the server's 30 minutes, so a session is never sent to after the server dropped it. */
+        const val IDLE_NEW_SESSION_MS = 20L * 60 * 1000
+        /** Below the server's 50,000, leaving room for the batch that is being decided on. */
+        const val SESSION_EVENT_BUDGET = 45_000
         private const val MEMORY_KEY = "config_key"
         private const val MEMORY_CONFIG = "config_signed"
 

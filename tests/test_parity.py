@@ -302,3 +302,9 @@ def test_identity_is_unknown_without_behaviour(api):
     status, body = api.post("/v1/risk/evaluate", {
         "session_id": "sess_never_seen_2", "user_id": "usr_nobody0001", "event_type": "LOGIN", "allow_degraded": True}, auth=True)
     assert status == 200 and body["identity"]["verdict"] == "UNKNOWN"
+
+
+def test_the_identity_verdict_is_kept_with_the_decision(api, admin, make_session):
+    run_session(api, make_session("genuine", 140))
+    shown = admin.call("get", "/v1/bo/decisions")[1]["decisions"][0]
+    assert shown["identity"]["verdict"] == "LEARNING" and "0 of 10" in shown["identity"]["text"]

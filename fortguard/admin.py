@@ -116,6 +116,7 @@ class DecisionLog:
             "latency_ms": result.get("latency_ms"),
             "baseline": result.get("baseline"),
             "ml": result.get("ml"),
+            "identity": result.get("identity"),
             "scoring_mode": result.get("scoring_mode"),
             "deny_list": result.get("deny_list") or [],
             "payee_lists": result.get("payee_lists") or [],

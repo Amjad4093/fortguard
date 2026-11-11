@@ -174,6 +174,29 @@ class CoreTest {
             "texts" to mapOf("behavioural" to mapOf("lang" to "en", "version" to 2L))), e.consentBlock())
     }
 
+    private fun motion(n: Int) = EventBuffer.Drained(emptyList(), emptyList(), emptyList(),
+        List(n) { mapOf("x" to 0.0, "y" to 9.8, "z" to 0.0, "ts" to 1L) }, emptyList())
+
+    @Test fun aQuietSessionIsReplacedButABusyOneIsKept() {
+        val e = engineWith(null, null)
+        val first = e.sessionId
+        e.rotateIfNeeded(motion(100), 1_000_000)
+        e.rotateIfNeeded(motion(100), 1_060_000)
+        assertEquals("a minute apart is the same session", first, e.sessionId)
+        e.rotateIfNeeded(motion(100), 1_060_000 + FortGuardEngine.IDLE_NEW_SESSION_MS)
+        assertFalse("twenty quiet minutes start a new one", first == e.sessionId)
+    }
+
+    @Test fun aNearlyFullSessionIsReplacedBeforeTheServerDropsData() {
+        val e = engineWith(null, null)
+        val first = e.sessionId
+        var now = 1_000_000L
+        repeat(FortGuardEngine.SESSION_EVENT_BUDGET / 5_000) { e.rotateIfNeeded(motion(5_000), now); now += 5_000 }
+        assertEquals(first, e.sessionId)
+        e.rotateIfNeeded(motion(5_000), now)
+        assertFalse("the batch that would overflow goes into a new session", first == e.sessionId)
+    }
+
     @Test fun aKindSwitchedOffIsNotCollected() {
         val b = EventBuffer()
         b.allowTouch = false; b.allowSensors = false
