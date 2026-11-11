@@ -5,43 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FortGuard Back Office</title>
 <style>
-/* FortGuard back office. Ledger-style console: a warm paper surface, an ink sidebar, serif headings for
-   titles and key numbers, and a sans-serif for everything you read or click. Both themes share the tokens. */
+/* FortGuard back office. Same look as the product film: deep navy surface, teal accent, one sans-serif
+   family, and three decision colours (allow, step-up, block) used the same way everywhere. */
 :root {
-  --bg: #f4f3ee; --surface: #ffffff; --hover: #f7f6f1; --ink: #16191e; --muted: #5d6673; --faint: #8a929d;
-  --rule: #e3e1d9; --rule-strong: #cfcbbf; --field: #ffffff;
-  --accent: #0f6f68; --accent-ink: #ffffff; --accent-soft: #e2f0ee;
-  --side: #15202b; --side-ink: #a9b6c4; --side-strong: #f4f6f8; --side-hover: #1d2b38; --side-rule: #263445;
-  --allow: #2b7a54; --allow-bg: #e4f2ea; --step: #94600f; --step-bg: #f8eed8; --block: #a8372b; --block-bg: #f8e4e1;
-  --info: #2657a8; --info-bg: #e5edf9; --grey: #5d6673; --grey-bg: #ebecee;
-  --radius: 12px; --shadow: 0 1px 2px rgba(22, 25, 30, .05);
-  --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --bg: #07111f; --surface: #0d1a2c; --hover: #122238; --ink: #f2f6fb; --muted: #93a4ba; --faint: #6b7c93;
+  --rule: #1b2a40; --rule-strong: #2a3b55; --field: #0a1626;
+  --accent: #2fd3a7; --accent2: #4aa8ff; --accent-ink: #04231a; --accent-soft: rgba(47, 211, 167, .16);
+  --side: #060e1b; --side-ink: #93a4ba; --side-strong: #f2f6fb; --side-hover: #0f1d31; --side-rule: #18263a;
+  --allow: #2fd3a7; --allow-bg: rgba(47, 211, 167, .15); --step: #ffb547; --step-bg: rgba(255, 181, 71, .15);
+  --block: #ff6b6b; --block-bg: rgba(255, 107, 107, .15);
+  --info: #4aa8ff; --info-bg: rgba(74, 168, 255, .15); --grey: #93a4ba; --grey-bg: #17263b;
+  --radius: 16px; --shadow: 0 12px 32px rgba(0, 0, 0, .28);
+  --glow: radial-gradient(1100px 620px at 82% -8%, rgba(20, 60, 120, .55) 0%, transparent 62%), radial-gradient(900px 600px at -6% 108%, rgba(13, 74, 70, .45) 0%, transparent 60%);
+  --serif: "Inter Display", Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #101316; --surface: #171b20; --hover: #1d2228; --ink: #e7eaee; --muted: #9aa4b0; --faint: #6f7986;
-    --rule: #262c33; --rule-strong: #353d47; --field: #12161a;
-    --accent: #3fb8ae; --accent-ink: #061d1b; --accent-soft: #15322f;
-    --side: #0b1116; --side-ink: #8e9ba9; --side-strong: #f2f4f7; --side-hover: #141c24; --side-rule: #1d2731;
-    --allow: #6bd29a; --allow-bg: #15301f; --step: #f0bd55; --step-bg: #33290f; --block: #ff8b7f; --block-bg: #3a1a17;
-    --info: #8fb4ff; --info-bg: #17223d; --grey: #9aa4b0; --grey-bg: #222830;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .35);
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #101316; --surface: #171b20; --hover: #1d2228; --ink: #e7eaee; --muted: #9aa4b0; --faint: #6f7986;
-  --rule: #262c33; --rule-strong: #353d47; --field: #12161a;
-  --accent: #3fb8ae; --accent-ink: #061d1b; --accent-soft: #15322f;
-  --side: #0b1116; --side-ink: #8e9ba9; --side-strong: #f2f4f7; --side-hover: #141c24; --side-rule: #1d2731;
-  --allow: #6bd29a; --allow-bg: #15301f; --step: #f0bd55; --step-bg: #33290f; --block: #ff8b7f; --block-bg: #3a1a17;
-  --info: #8fb4ff; --info-bg: #17223d; --grey: #9aa4b0; --grey-bg: #222830;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .35);
+:root[data-theme="light"] {
+  --bg: #f3f6fa; --surface: #ffffff; --hover: #f0f4f9; --ink: #0b1626; --muted: #52627a; --faint: #8492a6;
+  --rule: #e2e8f0; --rule-strong: #cbd5e1; --field: #ffffff;
+  --accent: #0f9d7a; --accent2: #1d6fd0; --accent-ink: #ffffff; --accent-soft: #dff5ee;
+  --allow: #0b8a66; --allow-bg: #dff5ee; --step: #a86400; --step-bg: #fdefd3; --block: #c93a3a; --block-bg: #fde4e4;
+  --info: #1d6fd0; --info-bg: #e1eefc; --grey: #52627a; --grey-bg: #e8edf3;
+  --shadow: 0 1px 2px rgba(11, 22, 38, .06); --glow: none;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--glow), var(--bg); background-attachment: fixed; color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
 input, select, textarea { min-height: 38px; padding: 0 11px; border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--field); }
 select { padding-right: 28px; }
@@ -115,7 +105,7 @@ main { padding: 30px 40px 64px; min-width: 0; max-width: 1320px; width: 100%; }
 .card h2 { font: 600 .95rem/1.3 var(--sans); margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--rule); }
 .card .body { padding: 16px 18px; }
 .grid { display: grid; gap: 16px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
 .tile { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px 18px 15px; box-shadow: var(--shadow); animation: rise .45s ease both; }
 .tile:nth-child(2) { animation-delay: .04s; } .tile:nth-child(3) { animation-delay: .08s; } .tile:nth-child(4) { animation-delay: .12s; }
 .tile:first-child { box-shadow: inset 3px 0 0 var(--accent), var(--shadow); }
@@ -139,7 +129,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .STEP_UP, .INVESTIGATING { background: var(--step-bg); color: var(--step); }
 .BLOCK, .REVOKED, .CONFIRMED_FRAUD { background: var(--block-bg); color: var(--block); }
 .OPEN { background: var(--info-bg); color: var(--info); }
-.CLOSED, .inactive { background: var(--grey-bg); color: var(--grey); }
+.CLOSED, .inactive, .GREY { background: var(--grey-bg); color: var(--grey); }
 .bar { height: 8px; background: var(--grey-bg); border-radius: 4px; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 .barrow { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 14px; align-items: center; margin: 12px 0; font-size: .875rem; }
@@ -216,15 +206,69 @@ tr.link { cursor: pointer; }
 .me { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; font: 700 .72rem/1 var(--sans); letter-spacing: .02em; flex: none; }
 .strip-note { font-size: .8rem; color: var(--muted); margin: -6px 0 14px; }
+/* film look: heavier headings, brand lock-up, gauge, donut, reason bars */
+.pagehead h1, #login h1 { font-weight: 800; letter-spacing: -.02em; }
+#login .lead { font-weight: 800; font-size: 2.3rem; letter-spacing: -.02em; max-width: 16ch; }
+#login .lead em { font-style: normal; color: var(--accent); }
+#login .login-side { background: var(--glow), var(--side); }
+.tile b, .stat b { font-weight: 800; letter-spacing: -.02em; }
+.tile.allow b { color: var(--allow); } .tile.step b { color: var(--step); } .tile.block b { color: var(--block); }
+.brand { font-weight: 800; letter-spacing: -.02em; font-size: 1.25rem; color: var(--side-strong); }
+.brand svg { width: 26px; height: 30px; flex: none; }
+.brand i { font-style: normal; color: var(--accent); }
+nav .brand { font: 800 1.25rem var(--serif); }
+.byline { font-size: .72rem; letter-spacing: .22em; text-transform: uppercase; color: var(--side-ink); font-weight: 600; margin-top: 6px; }
+nav .byline { padding: 0 10px 18px; margin-top: -16px; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px; }
+.card h2 { font-weight: 700; }
+th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
+.gaugebox { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 8px 26px; align-items: center; }
+@media (max-width: 640px) { .gaugebox { grid-template-columns: minmax(0, 1fr); } }
+.gauge { width: 100%; max-width: 240px; display: block; margin: 0 auto; }
+.gauge text { font-family: var(--serif); }
+.gauge .num { font-size: 44px; font-weight: 800; text-anchor: middle; }
+.gauge .cap { font-size: 11px; fill: var(--muted); text-anchor: middle; font-family: var(--sans); }
+.verdict { display: grid; gap: 6px; }
+.verdict b { font: 800 1.5rem/1.15 var(--serif); letter-spacing: -.02em; }
+.verdict span { color: var(--muted); font-size: .9rem; }
+.donutbox { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 22px; align-items: center; }
+.donut { width: 150px; height: 150px; }
+.donut .num { font: 800 26px var(--serif); text-anchor: middle; fill: var(--ink); }
+.donut .cap { font: 11px var(--sans); text-anchor: middle; fill: var(--muted); }
+.keyrow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; font-size: .9rem; border-top: 1px solid var(--rule); }
+.keyrow:first-child { border-top: 0; }
+.keyrow i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; }
+.keyrow b { font-variant-numeric: tabular-nums; }
+.why { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 4px 14px; padding: 12px 0; border-top: 1px solid var(--rule); font-size: .9rem; align-items: center; }
+.why:first-child { border-top: 0; padding-top: 0; }
+.why code { color: var(--faint); font: .72rem var(--mono); }
+.why .bar { margin-top: 7px; }
+.why .bar > i { background: linear-gradient(90deg, var(--step), var(--block)); }
+.why .pts { grid-row: auto; grid-column: 2; text-align: right; }
+.bar > i { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.mlmeter { position: relative; height: 12px; border-radius: 6px; background: var(--grey-bg); margin: 16px 0 26px; }
+.mlmeter > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.mlmeter.over > i { background: linear-gradient(90deg, var(--step), var(--block)); }
+.mlmeter > u { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
+.mlmeter > small { position: absolute; top: 18px; transform: translateX(-50%); font-size: .72rem; color: var(--muted); white-space: nowrap; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { border: 1px solid var(--rule-strong); border-radius: 999px; padding: 3px 11px; font-size: .78rem; color: var(--muted); }
+#view > * + * { margin-top: 16px; }
+#view > .pagehead + *, #view > .back + * { margin-top: 0; }
+.callout { margin-bottom: 0; }
+.tile.long b { font-size: 1.15rem; line-height: 1.35; }
+.themebtn { background: transparent; color: var(--side-ink); border-color: var(--side-rule); width: 100%; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="fg-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2fd3a7"/><stop offset="1" stop-color="#4aa8ff"/></linearGradient></defs></svg>
 
 <section id="login" class="hidden">
   <aside class="login-side">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>FortGuard</div>
+    <div><div class="brand"><svg viewBox="0 0 150 170" aria-hidden="true"><path d="M75 6 L138 30 V82 C138 122 112 150 75 164 C38 150 12 122 12 82 V30 Z" fill="none" stroke="url(#fg-g)" stroke-width="12" stroke-linejoin="round"/><path d="M48 86 L68 106 L104 66" fill="none" stroke="url(#fg-g)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Fort<i>Guard</i></span></div><div class="byline">by Fortanixor</div></div>
     <div>
-      <p class="lead">Review risk decisions, work cases and tune the rules in one place.</p>
+      <p class="lead">Know it is really <em>your customer</em>.</p>
+      <p class="fine" style="margin-top:14px;max-width:38ch">Review risk decisions, work cases and tune the rules in one place.</p>
     </div>
     <p class="fine">Test server. Attestation is simulated and all data is synthetic.</p>
   </aside>
@@ -244,7 +288,7 @@ tr.link { cursor: pointer; }
 
 <div id="app" class="hidden">
   <nav aria-label="Main">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>FortGuard</div>
+    <div class="brand"><svg viewBox="0 0 150 170" aria-hidden="true"><path d="M75 6 L138 30 V82 C138 122 112 150 75 164 C38 150 12 122 12 82 V30 Z" fill="none" stroke="url(#fg-g)" stroke-width="12" stroke-linejoin="round"/><path d="M48 86 L68 106 L104 66" fill="none" stroke="url(#fg-g)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Fort<i>Guard</i></span></div><div class="byline">by Fortanixor</div>
     <div class="group">Monitor</div>
     <a href="#/dashboard" data-page="dashboard">Dashboard</a>
     <a href="#/cases" data-page="cases">Cases <span class="count hidden" id="nav-open"></span></a>
@@ -256,7 +300,7 @@ tr.link { cursor: pointer; }
     <a href="#/users" data-page="users" class="admin-only">Users</a>
     <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
     <div class="spacer"></div>
-    <div class="who"><span class="me"><i class="avatar" id="avatar" aria-hidden="true"></i><span id="who"></span></span><button type="button" id="logout">Sign out</button></div>
+    <div class="who"><span class="me"><i class="avatar" id="avatar" aria-hidden="true"></i><span id="who"></span></span><button type="button" id="theme" class="themebtn">Light theme</button><button type="button" id="logout">Sign out</button></div>
   </nav>
   <main>
     <div class="banner hidden" id="dev-banner">Test server: attestation is simulated and data is synthetic. Not for real customers.</div>
@@ -333,6 +377,18 @@ tr.link { cursor: pointer; }
     clearInterval(S.timer); $("app").classList.add("hidden"); $("login").classList.remove("hidden"); $("l-user").focus();
   }
   $("logout").addEventListener("click", function () { signOut(false); });
+  // Theme: the navy film look by default, a light option for bright rooms. Remembered on this browser only.
+  function applyTheme(t) {
+    if (t === "light") document.documentElement.setAttribute("data-theme", "light"); else document.documentElement.removeAttribute("data-theme");
+    $("theme").textContent = t === "light" ? "Dark theme" : "Light theme";
+  }
+  var savedTheme = null; try { savedTheme = localStorage.getItem("fg_theme"); } catch (e) { /* private window */ }
+  applyTheme(savedTheme);
+  $("theme").addEventListener("click", function () {
+    var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    try { localStorage.setItem("fg_theme", next); } catch (e) { /* ignore */ }
+    applyTheme(next);
+  });
 
   async function start() {
     if (!S.token) return signOut(true);
@@ -381,14 +437,90 @@ tr.link { cursor: pointer; }
     v.appendChild(el("div", { class: "pagehead" }, [el("div", { class: "pagehead-text" }, text)].concat(extra || [])));
   }
 
+  // --- pictures: gauge, donut, reason bars, machine-learning card ----------------------------------
+  var LEVEL_TEXT = { ALLOW: "Allowed", STEP_UP: "Step-up: verify again", BLOCK: "Blocked" };
+  var LEVEL_VAR = { ALLOW: "allow", STEP_UP: "step", BLOCK: "block" };
+  function svg(tag, attrs, kids) {
+    var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (k === "text") e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]); });
+    (kids || []).forEach(function (c) { e.appendChild(c); });
+    return e;
+  }
+  // The 0 to 1000 score on a half dial. The bands come from the live rules, so the dial moves if they are edited.
+  function gauge(score) {
+    var bands = S.bands || { step_up_from: 600, block_from: 900 };
+    var r = 84, cx = 120, cy = 112, s1 = bands.step_up_from, s2 = bands.block_from;
+    function P(v) { var a = Math.PI * (1 - v / 1000); return (cx + r * Math.cos(a)).toFixed(1) + " " + (cy - r * Math.sin(a)).toFixed(1); }
+    function arc(a, b, color) { return svg("path", { d: "M" + P(a) + " A" + r + " " + r + " 0 0 1 " + P(b), fill: "none", stroke: color, "stroke-width": "15" }); }
+    var lvl = score >= s2 ? "block" : score >= s1 ? "step" : "allow";
+    var g = svg("svg", { viewBox: "0 0 240 134", class: "gauge", role: "img", "aria-label": "Risk score " + score + " of 1000" }, [
+      arc(0, Math.max(1, s1 - 6), "var(--allow)"), arc(s1 + 6, Math.max(s1 + 7, s2 - 6), "var(--step)"), arc(Math.min(999, s2 + 6), 1000, "var(--block)")]);
+    var ang = -90 + 180 * Math.max(0, Math.min(1000, score)) / 1000;
+    g.appendChild(svg("path", { d: "M-7 -109 L0 -95 L7 -109 Z", fill: "var(--ink)", transform: "translate(" + cx + " " + cy + ") rotate(" + ang + ")" }));
+    g.appendChild(svg("text", { x: cx, y: cy - 6, class: "num", fill: "var(--" + lvl + ")", text: String(score) }));
+    g.appendChild(svg("text", { x: cx, y: cy + 12, class: "cap", text: "risk score of 1000" }));
+    return g;
+  }
+  function decisionCard(d, title) {
+    return card(title || "Decision", [el("div", { class: "gaugebox" }, [gauge(d.risk_score), el("div", { class: "verdict" }, [
+      el("div", { class: "eyebrow", text: d.scoring_mode === "RULES_AND_ML" ? "Rules and machine learning" : (d.degraded ? "Degraded mode" : "Rules") }),
+      el("b", { text: LEVEL_TEXT[d.risk_level] || d.risk_level, style: "color:var(--" + (LEVEL_VAR[d.risk_level] || "ink") + ")" }),
+      el("span", { text: FGCore.ACTIONS[d.action_recommended] || d.action_recommended || "" })])])]);
+  }
+  function donut(parts, total) {
+    var C = 2 * Math.PI * 54, off = 0;
+    var g = svg("svg", { viewBox: "0 0 150 150", class: "donut", role: "img", "aria-label": total + " decisions" });
+    g.appendChild(svg("circle", { cx: 75, cy: 75, r: 54, fill: "none", stroke: "var(--grey-bg)", "stroke-width": "18" }));
+    parts.forEach(function (p) {
+      if (!total || !p[0]) return;
+      var len = C * p[0] / total;
+      g.appendChild(svg("circle", { cx: 75, cy: 75, r: 54, fill: "none", stroke: p[1], "stroke-width": "18", "stroke-dasharray": len + " " + C, "stroke-dashoffset": String(-off), transform: "rotate(-90 75 75)" }));
+      off += len;
+    });
+    g.appendChild(svg("text", { x: 75, y: 80, class: "num", text: String(total) }));
+    g.appendChild(svg("text", { x: 75, y: 98, class: "cap", text: "decisions" }));
+    return g;
+  }
+  function whyRows(items) {
+    var max = Math.max.apply(null, [1].concat(items.map(function (i) { return i.points; })));
+    return items.map(function (item) {
+      return el("div", { class: "why" }, [el("div", {}, [el("div", { text: reasonText(item.reason) }), el("code", { text: item.reason }),
+        el("div", { class: "bar" }, [el("i", { style: "width:" + Math.max(4, item.points / max * 100) + "%" })])]), el("span", { class: "pts", text: "+" + item.points })]);
+    });
+  }
+  function featureName(f) { return f.replace(/^ft_/, "").replace(/_/g, " "); }
+  // What the per-customer machine-learning model said about one session (see docs/ML.md).
+  function mlCard(m) {
+    m = m || { status: "NONE", sessions: 0, required: 10 };
+    var kids = [el("p", { class: "hint", text: "A model learned from this customer's own allowed sessions. It measures how far a session sits from their usual behavior, taking the features together. It has not been trained on fraud, so it shows what is unusual for this customer, not what is fraud." })];
+    if (m.status === "ACTIVE") {
+      var scale = Math.max(m.threshold * 2, m.distance * 1.1) || 1, pos = Math.min(100, m.distance / scale * 100), th = m.threshold / scale * 100;
+      kids.push(el("div", { class: "verdict" }, [el("b", { text: m.anomalous ? "Unlike this customer's usual sessions" : "Within this customer's usual range", style: "color:var(--" + (m.anomalous ? "block" : "allow") + ")" }),
+        el("span", { text: "Distance " + m.distance + " against a limit of " + m.threshold + ". Learned from " + m.sessions + " sessions, " + m.features + " features used." })]));
+      kids.push(el("div", { class: "mlmeter" + (m.anomalous ? " over" : "") }, [el("i", { style: "width:" + pos + "%" }), el("u", { style: "left:" + th + "%" }), el("small", { style: "left:" + th + "%", text: "this customer's limit" })]));
+      if (m.top_features && m.top_features.length) kids.push(el("div", {}, [el("div", { class: "sub", text: m.anomalous ? "What looked most unusual" : "Largest differences, still within range" }),
+        el("div", { class: "tags" }, m.top_features.map(function (f) { return el("span", { class: "tag", text: featureName(f) }); }))]));
+    } else if (m.status === "LEARNING") {
+      kids.push(meterRow("Model learning", m.sessions / m.required, m.sessions + " of " + m.required + " allowed sessions"));
+    } else if (m.status === "INSUFFICIENT_FEATURES") {
+      kids.push(el("div", { class: "empty", text: "This session had too few behavioral measurements for the model to score it." }));
+    } else {
+      kids.push(el("div", { class: "empty", text: "No model yet. It starts once this customer has " + (m.required || 10) + " allowed sessions." }));
+    }
+    return card("Machine-learning check", kids);
+  }
+
   // --- dashboard -------------------------------------------------------------------------------------
   async function dashboard(v) {
     var sim = S.dev && can("analyst") ? el("button", { type: "button", text: "Run sample scenarios", onclick: simulate }) : null;
     head(v, "Dashboard", [sim]);
     var o = await call("GET", "/v1/bo/overview");
     var t = o.last_24h;
+    if (o.bands) S.bands = o.bands;
+    var ml = o.ml || { scored: 0, flagged: 0 };
     v.appendChild(el("div", { class: "tiles" }, [
-      tile(t.total, "Decisions, last 24 h"), tile(t.ALLOW, "Allowed"), tile(t.STEP_UP, "Stepped up"), tile(t.BLOCK, "Blocked"),
+      tile(t.total, "Decisions, last 24 h"), tile(t.ALLOW, "Allowed", "allow"), tile(t.STEP_UP, "Stepped up", "step"), tile(t.BLOCK, "Blocked", "block"),
+      tile(ml.scored, "Scored with the ML model"), tile(ml.flagged, "Flagged by the ML model"),
       tile(o.cases.OPEN + o.cases.INVESTIGATING, "Cases to work"), tile(o.cases.CONFIRMED_FRAUD, "Confirmed fraud"),
       tile(o.devices.total, "Devices (" + o.devices.revoked + " revoked)"),
       tile(duration(o.time_in_app_ms), "Time in the app, all customers")
@@ -414,10 +546,14 @@ tr.link { cursor: pointer; }
       var bar = el("div", { class: "bar" }, [el("i", { style: "width:" + (r[1] / topMax * 100) + "%" })]);
       return el("div", { class: "barrow" }, [el("div", {}, [el("div", { class: "lbl", text: reasonText(r[0]) }), bar]), el("b", { text: String(r[1]) })]);
     }) : [el("div", { class: "empty", text: "No decisions yet." })];
+    function keyrow(color, label, n) { return el("div", { class: "keyrow" }, [el("span", {}, [el("i", { style: "background:" + color }), label]), el("b", { text: n + (t.total ? " · " + Math.round(n / t.total * 100) + "%" : "") })]); }
+    var mix = el("div", { class: "donutbox" }, [donut([[t.ALLOW, "var(--allow)"], [t.STEP_UP, "var(--step)"], [t.BLOCK, "var(--block)"]], t.total),
+      el("div", {}, [keyrow("var(--allow)", "Allowed", t.ALLOW), keyrow("var(--step)", "Stepped up", t.STEP_UP), keyrow("var(--block)", "Blocked", t.BLOCK)])]);
     v.appendChild(el("div", { class: "two" }, [
       card("Decisions per hour (last 24 h)", o.hourly.length ? [chart, legend] : [el("div", { class: "empty", text: "No decisions yet." + (S.dev ? " Use “Run sample scenarios” or the demo apps." : "") })]),
-      card("Most common reasons", reasons)
+      card("Decision mix (last 24 h)", [mix])
     ]));
+    v.appendChild(card("Most common reasons", reasons));
     var models = o.devices_by_model || [];
     var mmax = Math.max.apply(null, [1].concat(models.map(function (m) { return m.devices; })));
     v.appendChild(card("Devices by model", [el("p", { class: "hint", text: "The model each enrolled device reported with its latest decision." })].concat(
@@ -442,7 +578,7 @@ tr.link { cursor: pointer; }
       ]));
     }
   }
-  function tile(n, label) { return el("div", { class: "tile" }, [el("b", { text: String(n) }), el("span", { text: label })]); }
+  function tile(n, label, tone) { return el("div", { class: "tile" + (tone ? " " + tone : "") + (String(n).length > 9 ? " long" : "") }, [el("b", { text: String(n) }), el("span", { text: label })]); }
   // Time in the app, from milliseconds: "2h 14m", "38 min" or "under a minute".
   function duration(ms) {
     if (!ms) return "0 min";
@@ -637,10 +773,11 @@ tr.link { cursor: pointer; }
         el("td", {}, [el("div", { text: c.display_name || c.user_id }), c.display_name ? el("small", { class: "mono", text: c.user_id }) : null]),
         el("td", { class: "num", text: String(c.sessions) }), el("td", { class: "num", text: String(c.devices) }), el("td", { text: duration(c.active_ms) }),
         el("td", {}, [pill(c.owner === "MATURE" ? "ALLOW" : "GREY", (c.owner === "MATURE" ? "Profile ready" : (c.owner === "LEARNING" ? "Learning" : "No profile")) + " · " + Math.round((c.maturity || 0) * 100) + "%")]),
+        el("td", {}, [pill(c.ml === "ACTIVE" ? "ALLOW" : "GREY", c.ml === "ACTIVE" ? "Active" : (c.ml === "LEARNING" ? "Learning" : "Not started"))]),
         el("td", { text: levels }), el("td", { class: "num", text: String(c.max_risk) }), el("td", { text: when(c.last_ms) })]);
     });
     v.appendChild(el("section", { class: "card scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {},
-      ["Customer", "Sessions", "Devices", "Time in app", "Profile", "Decisions", "Top score", "Last seen"].map(function (h) { return el("th", { text: h }); }))]),
+      ["Customer", "Sessions", "Devices", "Time in app", "Profile", "ML model", "Decisions", "Top score", "Last seen"].map(function (h) { return el("th", { text: h }); }))]),
       el("tbody", {}, rows)]), rows.length ? null : el("div", { class: "empty", text: "No customers yet. Sessions appear here once the SDK sends them." })]));
   }
 
@@ -661,6 +798,7 @@ tr.link { cursor: pointer; }
     }
     v.appendChild(card("Customer", kids));
     if (c.latest) v.appendChild(ownerCallout(c.latest));
+    if (c.latest) v.appendChild(el("div", { class: "two" }, [decisionCard(c.latest, "Latest decision"), mlCard(c.latest.ml)]));
     var u = c.usage || {};
     var cov = c.coverage || { reporting: 0, of: 0, names: [] };
     v.appendChild(el("div", { class: "tiles" }, [tile(duration(u.active_ms), "Time in the app"),
@@ -669,6 +807,8 @@ tr.link { cursor: pointer; }
     v.appendChild(card("How much FortGuard knows about this customer", [
       el("p", { class: "hint", text: "Profile maturity is how much history has been built for this customer. It is not the accuracy of a decision: accuracy is measured only against confirmed fraud and genuine outcomes." }),
       meterRow("Profile maturity", c.maturity || 0, c.owner_profile.sessions + " of " + c.owner_profile.required + " sessions learned"),
+      meterRow("Machine-learning model", c.ml_model ? Math.min(1, c.ml_model.sessions / c.ml_model.required) : 0,
+        c.ml_model && c.ml_model.status === "ACTIVE" ? "active on " + c.ml_model.features.length + " features" : ((c.ml_model ? c.ml_model.sessions : 0) + " of " + (c.ml_model ? c.ml_model.required : 10) + " sessions before it starts")),
       meterRow("Sensor coverage, latest session", cov.of ? cov.reporting / cov.of : 0,
         cov.names.length ? "reporting: " + cov.names.join(", ") : "no sensor data in the latest session")]));
 
@@ -710,9 +850,7 @@ tr.link { cursor: pointer; }
     var d = c.decision;
     head(v, "Case #" + c.id, [pill(c.status), pill(c.risk_level, c.risk_level.replace("_", " ") + " · " + c.risk_score)]);
 
-    var why = d.score_breakdown.length ? d.score_breakdown.map(function (item) {
-      return el("div", { class: "reason" }, [el("span", { class: "pts", text: "+" + item.points }), el("div", { text: reasonText(item.reason) }), el("code", { text: item.reason })]);
-    }) : [el("div", { class: "empty", text: "No risk signals fired." })];
+    var why = d.score_breakdown.length ? whyRows(d.score_breakdown) : [el("div", { class: "empty", text: "No risk signals fired." })];
     var td = d.threat_details || {};
     var facts = el("dl", { class: "kv" });
     [["Recommended action", FGCore.ACTIONS[d.action_recommended] || d.action_recommended], ["User", c.user_id], ["Session", c.session_id],
@@ -723,7 +861,7 @@ tr.link { cursor: pointer; }
      ["Signals used", d.signals_used + (d.degraded ? " (degraded mode)" : "")], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
-    var left = [ownerCallout(d), card("Why FortGuard flagged it", why), card("Details", [facts])];
+    var left = [decisionCard(d), ownerCallout(d), card("Why FortGuard flagged it", why), mlCard(d.ml), card("Details", [facts])];
     left = left.concat(measurementCards(d));
     if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
       return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);

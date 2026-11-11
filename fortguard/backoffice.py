@@ -414,8 +414,12 @@ def register(app, *, bo, api_key, registry, dev_mode):
         hourly = defaultdict(lambda: {"ALLOW": 0, "STEP_UP": 0, "BLOCK": 0})
         seen = Counter()  # decisions in which each signal delivered at least one sample
         cpm_buckets = Counter()
+        ml_scored = ml_flagged = 0
         for r in rows:
             rec = json.loads(r["record"])
+            ml = rec.get("ml") or {}
+            ml_scored += ml.get("status") == "ACTIVE"
+            ml_flagged += bool(ml.get("anomalous"))
             for code in rec.get("reason_codes", []):
                 reasons[code] += 1
             hourly[(r["time_ms"] // 3_600_000) * 3_600_000][r["risk_level"]] += 1
@@ -430,6 +434,9 @@ def register(app, *, bo, api_key, registry, dev_mode):
         return jsonify({
             "last_24h": {"total": len(rows), "ALLOW": levels["ALLOW"], "STEP_UP": levels["STEP_UP"], "BLOCK": levels["BLOCK"]},
             "top_reasons": reasons.most_common(8),
+            "bands": dict(config.BANDS["default"]),
+            # Decisions the machine-learning model was mature enough to score, and how many it flagged.
+            "ml": {"scored": ml_scored, "flagged": ml_flagged},
             "hourly": [{"hour_ms": h, **hourly[h]} for h in
                        range((since // 3_600_000 + 1) * 3_600_000, bo.now_ms() + 1, 3_600_000)] if rows else [],
             "cases": {s: statuses[s] for s in CASE_STATUSES},
