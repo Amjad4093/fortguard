@@ -304,7 +304,7 @@ def validate_evaluate(p):
         _fail("invalid_request", "allow_degraded must be true or false")
 
     tx = p.get("transaction_details")
-    if p["event_type"] in config.SENSITIVE_EVENTS and tx is None:
+    if p["event_type"] in config.PAYMENT_EVENTS and tx is None:
         _fail("invalid_request", "transaction_details is required for this event_type")
     if tx is not None:
         if not isinstance(tx, dict) or set(tx) - TX_ALLOWED:
@@ -312,7 +312,7 @@ def validate_evaluate(p):
         acct = tx.get("beneficiary_account")
         if acct is not None and (not isinstance(acct, str) or not 8 <= len(acct) <= 40):
             _fail("invalid_request", "beneficiary_account must be a string of 8 to 40 characters")
-        if p["event_type"] in config.SENSITIVE_EVENTS and acct is None:
+        if p["event_type"] in config.PAYMENT_EVENTS and acct is None:
             _fail("invalid_request", "beneficiary_account is required for this event_type")
         if p["event_type"] == "FUNDS_TRANSFER":
             _need_num(tx.get("amount"), "amount", 0)

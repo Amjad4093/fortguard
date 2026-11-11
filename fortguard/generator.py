@@ -189,7 +189,7 @@ def build_session(scenario, now_ms, seed=0, device=None):
         "session_id": session_id, "user_id": user_id, "event_type": "FUNDS_TRANSFER",
         "request_id": _ident(rng, "req_", 12),
         "transaction_details": {"amount": 250000.0, "currency": "PKR",
-                                "beneficiary_account": "PK36EXMP00992201029381",
+                                "beneficiary_account": "PK36EXMP%014d" % rng.randrange(10 ** 14),  # a different payee each session
                                 "is_new_beneficiary": new_payee},
     }
     return {

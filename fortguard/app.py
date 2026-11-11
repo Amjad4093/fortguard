@@ -254,6 +254,10 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         tx_account = (body.get("transaction_details") or {}).get("beneficiary_account")
         denied = bo.deny_match(customer=body["user_id"], device=getattr(session, "device_guid", None),
                                account=tx_account, ip=getattr(session, "ip", None))
+        now_ms = int(clock() * 1000)
+        payee_lists = bo.payee_lists(tx_account)
+        velocity = bo.velocity.snapshot(body["user_id"], getattr(session, "device_guid", None), body["event_type"],
+                                        body.get("transaction_details"), now_ms)
         if session is None:
             if not body.get("allow_degraded"):
                 return _error(404, "unknown_session", "no telemetry has been received for this session")
@@ -267,7 +271,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
                 session.user_id = body["user_id"]
                 try:
                     result = score_session(session, body["event_type"], body.get("transaction_details"),
-                                           baselines=baselines, user_id=body["user_id"], denied=denied)
+                                           baselines=baselines, user_id=body["user_id"], denied=denied,
+                                           velocity=velocity, lists=payee_lists, custom=bo.custom)
                 except Exception:
                     if not body.get("allow_degraded"):
                         raise
@@ -275,9 +280,12 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
                     result = degraded_decision(body["event_type"], body.get("transaction_details"),
                                                "REASON_DEGRADED_SCORING_ERROR", denied)
         feats = result.pop("_features", None)
+        rule_facts = result.pop("_rule_facts", None)
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-        bo.record_decision(decisions.record(body, session, result, clock(), feats))
+        bo.record_decision(decisions.record(body, session, result, clock(), feats, rule_facts))
+        bo.velocity.record(body["user_id"], getattr(session, "device_guid", None), body["event_type"],
+                           body.get("transaction_details"), body["session_id"], now_ms)
         app.fortguard_metrics.decision(result["risk_level"], result.get("degraded"))
         if feats is not None and (result["risk_level"] == "ALLOW" or getattr(session, "owner_proved", False)):
             baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))

@@ -68,7 +68,7 @@
     REASON_SCREEN_SHARING_ACTIVE: "Screen sharing is on during a sensitive action.",
     REASON_LOCATION_SPOOFING_SUSPECTED: "Mock or spoofed location is switched on.",
     REASON_VPN_OR_PROXY: "A VPN or proxy is active.",
-    REASON_ACTIVE_CALL_DURING_PAYMENT: "A phone call is active during a payment.",
+    REASON_ACTIVE_CALL_DURING_PAYMENT: "A phone call is active during a payment or an account change.",
     REASON_PASTE_ACTIVITY_IN_BENEFICIARY_FIELD: "The beneficiary account was pasted, not typed.",
     REASON_COGNITIVE_HESITATION_DETECTED: "Long pauses between inputs, as when someone is being coached.",
     REASON_NEW_BENEFICIARY: "Payment to a new beneficiary.",
@@ -87,6 +87,11 @@
     REASON_SIM_CHANGED: "The SIM's operator changed since the app last ran.",
     REASON_SIM_SWAP_PATTERN: "SIM changed and money is going to a new payee: the usual shape of a SIM-swap takeover.",
     REASON_ON_DENY_LIST: "The customer, device, payee account or network address is on the bank's deny list.",
+    REASON_SUSPECTED_MULE_ACCOUNT: "The payee account is on the bank's suspected-mule list.",
+    REASON_VELOCITY_MANY_PAYMENTS: "An unusual number of payments by this customer in 24 hours.",
+    REASON_VELOCITY_MANY_NEW_PAYEES: "Several new payees used by this customer in 24 hours.",
+    REASON_DEVICE_USED_BY_MANY_CUSTOMERS: "This phone has been used by several different customers this week.",
+    REASON_PAYEE_PAID_BY_MANY_CUSTOMERS: "Several customers added this same new payee account this week.",
     REASON_DEGRADED_NO_TELEMETRY: "Degraded mode: no behavioral data, decided from the transaction alone.",
     REASON_DEGRADED_SCORING_ERROR: "Degraded mode: scoring failed, decided from the transaction alone."
   };

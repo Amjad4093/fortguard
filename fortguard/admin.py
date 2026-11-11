@@ -90,7 +90,7 @@ class DecisionLog:
         self._items = deque(maxlen=maxlen)
         self._lock = threading.Lock()
 
-    def record(self, body, session, result, now_s, features=None):
+    def record(self, body, session, result, now_s, features=None, rule_facts=None):
         tx = body.get("transaction_details") or {}
         env = getattr(session, "env", None) or {}
         account = tx.get("beneficiary_account")
@@ -118,6 +118,11 @@ class DecisionLog:
             "ml": result.get("ml"),
             "scoring_mode": result.get("scoring_mode"),
             "deny_list": result.get("deny_list") or [],
+            "payee_lists": result.get("payee_lists") or [],
+            "velocity": result.get("velocity"),
+            "shadow_rules": result.get("shadow_rules") or [],
+            # What the bank's own rules could read for this decision, kept so a draft rule can be tried on history.
+            "rule_facts": rule_facts,
             # Numbers only: the behavioural measurements behind this decision, for the back office.
             "features": {k: round(float(v), 4) for k, v in (features or {}).items()
                          if isinstance(v, (int, float)) and not isinstance(v, bool)},

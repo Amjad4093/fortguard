@@ -45,7 +45,7 @@ from collections import Counter, defaultdict
 
 from flask import g, jsonify, request
 
-from . import config, mlmodel
+from . import config, customrules, mlmodel, rulelang
 from .admin import SIGNAL_KEYS
 from .schema import ValidationFailure
 
@@ -103,12 +103,19 @@ CREATE INDEX IF NOT EXISTS feedback_session ON feedback(session_id);
 CREATE TABLE IF NOT EXISTS deny_list (
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value_hash TEXT NOT NULL, label TEXT NOT NULL,
     reason TEXT NOT NULL, added_by TEXT NOT NULL, created_ms INTEGER NOT NULL, expires_ms INTEGER,
-    UNIQUE(kind, value_hash));
+    list TEXT NOT NULL DEFAULT 'deny', UNIQUE(kind, value_hash));
 """
 
 # What the bank can put on its deny list. A match on any of them blocks the decision.
 DENY_KINDS = ("customer", "device", "account", "ip")
 DENY_MAX_DAYS = 3650
+# The three lists. Only payee accounts can go on the mule and allow lists, and an account is on one list
+# at a time.
+#   deny   block outright
+#   mule   suspected mule account: step up alone, block with almost any other signal
+#   allow  trusted payee (the bank's own accounts, known billers): never treated as a new payee
+LISTS = ("deny", "mule", "allow")
+LIST_TEXT = {"deny": "deny list", "mule": "suspected-mule list", "allow": "trusted list"}
 
 
 def _deny_value(kind, value):
@@ -177,10 +184,15 @@ class BackOffice:
         self._failed = defaultdict(list)
         with self.lock:
             self.db.executescript(SCHEMA)
+            if "list" not in [c["name"] for c in self.db.execute("PRAGMA table_info(deny_list)")]:
+                self.db.execute("ALTER TABLE deny_list ADD COLUMN list TEXT NOT NULL DEFAULT 'deny'")  # databases from before the lists
             self.db.commit()
         self.defaults = {"weights": dict(config.WEIGHTS), "bands": json.loads(json.dumps(config.BANDS))}
-        self._deny = {}          # (kind, value_hash) -> expires_ms or None, kept in memory for the decision path
+        self._deny = {}          # (kind, value_hash) -> (list, expires_ms or None), kept in memory for the decision path
         self._load_deny()
+        from .velocity import Velocity
+        self.velocity = Velocity(self)
+        self.custom = customrules.CustomRules(self)
 
     def now_ms(self):
         return int(self.clock() * 1000)
@@ -317,6 +329,7 @@ class BackOffice:
             "feedback": self.x("DELETE FROM feedback WHERE time_ms < ?", (now - r["feedback"] * day,)).rowcount,
             "audit": self.x("DELETE FROM audit WHERE time_ms < ?", (now - r["audit"] * day,)).rowcount,
             "tokens": self.x("DELETE FROM tokens WHERE expires_ms < ?", (now,)).rowcount,
+            "velocity_history": self.velocity.purge(now),
         }
         if baselines is not None:
             out["baseline_sessions"] = self.x("DELETE FROM baseline_sessions WHERE time_ms < ?", (now - r["decisions"] * day,)).rowcount
@@ -335,6 +348,7 @@ class BackOffice:
             "decisions": self.x("DELETE FROM decisions WHERE json_extract(record, '$.user_id') = ?", (user_id,)).rowcount,
             "cases": self.x("DELETE FROM cases WHERE user_id = ? AND status <> 'CONFIRMED_FRAUD'", (user_id,)).rowcount,
             "kept_fraud_cases": self.q("SELECT COUNT(*) AS n FROM cases WHERE user_id = ?", (user_id,))[0]["n"],
+            "velocity_history": self.velocity.erase(user_id),
         }
         self.x("DELETE FROM notes WHERE case_id NOT IN (SELECT id FROM cases)")
         return out
@@ -343,16 +357,19 @@ class BackOffice:
     # --- deny list ---------------------------------------------------------------------------------
 
     def _load_deny(self):
-        rows = self.q("SELECT kind, value_hash, expires_ms FROM deny_list")
-        self._deny = {(r["kind"], r["value_hash"]): r["expires_ms"] for r in rows}
+        rows = self.q("SELECT kind, value_hash, expires_ms, list FROM deny_list")
+        self._deny = {(r["kind"], r["value_hash"]): (r["list"], r["expires_ms"]) for r in rows}
 
-    def deny_add(self, kind, value, reason, actor, expires_ms=None):
+    def deny_add(self, kind, value, reason, actor, expires_ms=None, list_name="deny"):
         value = _deny_value(kind, value)
+        if list_name != "deny" and kind != "account":
+            raise ValidationFailure(400, "invalid_request", f"only payee accounts can go on the {LIST_TEXT[list_name]}")
         try:
-            self.x("INSERT INTO deny_list (kind, value_hash, label, reason, added_by, created_ms, expires_ms) VALUES (?,?,?,?,?,?,?)",
-                   (kind, _deny_hash(kind, value), _deny_label(kind, value), reason, actor, self.now_ms(), expires_ms))
+            self.x("INSERT INTO deny_list (kind, value_hash, label, reason, added_by, created_ms, expires_ms, list) VALUES (?,?,?,?,?,?,?,?)",
+                   (kind, _deny_hash(kind, value), _deny_label(kind, value), reason, actor, self.now_ms(), expires_ms, list_name))
         except sqlite3.IntegrityError:
-            raise ValidationFailure(409, "already_listed", f"that {kind} is already on the deny list") from None
+            on = self.q("SELECT list FROM deny_list WHERE kind=? AND value_hash=?", (kind, _deny_hash(kind, value)))[0]["list"]
+            raise ValidationFailure(409, "already_listed", f"that {kind} is already on the {LIST_TEXT[on]}") from None
         self._load_deny()
         return self.q("SELECT * FROM deny_list WHERE kind=? AND value_hash=?", (kind, _deny_hash(kind, value)))[0]
 
@@ -366,27 +383,34 @@ class BackOffice:
 
     def deny_entries(self):
         now = self.now_ms()
-        return [{"id": r["id"], "kind": r["kind"], "label": r["label"], "reason": r["reason"], "added_by": r["added_by"],
-                 "created_ms": r["created_ms"], "expires_ms": r["expires_ms"],
+        return [{"id": r["id"], "kind": r["kind"], "list": r["list"], "label": r["label"], "reason": r["reason"],
+                 "added_by": r["added_by"], "created_ms": r["created_ms"], "expires_ms": r["expires_ms"],
                  "expired": r["expires_ms"] is not None and r["expires_ms"] <= now}
                 for r in self.q("SELECT * FROM deny_list ORDER BY id DESC")]
+
+    def _listed(self, kind, value, now):
+        """Which list this value is on right now, or None."""
+        try:
+            entry = self._deny.get((kind, _deny_hash(kind, _deny_value(kind, value))))
+        except ValidationFailure:
+            return None
+        if entry is None or (entry[1] is not None and entry[1] <= now):
+            return None
+        return entry[0]
 
     def deny_match(self, **values):
         """Which kinds of this request are on the deny list and not expired, e.g. ("account",)."""
         if not self._deny:
             return ()
         now = self.now_ms()
-        hit = []
-        for kind, value in values.items():
-            if not value:
-                continue
-            try:
-                key = (kind, _deny_hash(kind, _deny_value(kind, value)))
-            except ValidationFailure:
-                continue
-            if key in self._deny and (self._deny[key] is None or self._deny[key] > now):
-                hit.append(kind)
-        return tuple(hit)
+        return tuple(kind for kind, value in values.items() if value and self._listed(kind, value, now) == "deny")
+
+    def payee_lists(self, account):
+        """The mule or allow list a payee account is on: ("mule",), ("allow",) or ()."""
+        if not self._deny or not account:
+            return ()
+        on = self._listed("account", account, self.now_ms())
+        return (on,) if on in ("mule", "allow") else ()
 
     def load_rules(self):
         """Apply rule settings saved earlier, if any."""
@@ -396,10 +420,16 @@ class BackOffice:
             config.WEIGHTS.update({k: v for k, v in saved.get("weights", {}).items() if k in config.WEIGHTS})
             if "bands" in saved:
                 config.BANDS["default"].update(saved["bands"])
+            for journey in [j for j in config.BANDS if j != "default"]:
+                del config.BANDS[journey]
+            for journey, bands in saved.get("journey_bands", {}).items():
+                if journey in config.EVENT_TYPES:
+                    config.BANDS[journey] = dict(bands)
 
     def save_rules(self):
         self.x("INSERT OR REPLACE INTO settings VALUES ('rules', ?)",
-               (json.dumps({"weights": config.WEIGHTS, "bands": config.BANDS["default"]}),))
+               (json.dumps({"weights": config.WEIGHTS, "bands": config.BANDS["default"],
+                            "journey_bands": {j: b for j, b in config.BANDS.items() if j != "default"}}),))
 
 
 def _case_row(r, with_decision=False):
@@ -663,14 +693,17 @@ def register(app, *, bo, api_key, registry, dev_mode):
     @app.get("/v1/bo/deny-list")
     def bo_deny_list():
         need("viewer")
-        return jsonify({"entries": bo.deny_entries(), "kinds": list(DENY_KINDS)})
+        return jsonify({"entries": bo.deny_entries(), "kinds": list(DENY_KINDS), "lists": list(LISTS)})
 
     @app.post("/v1/bo/deny-list")
     def bo_deny_add():
         user = need("analyst")
         data = body()
-        if set(data) - {"kind", "value", "reason", "expires_days"}:
-            raise ValidationFailure(400, "unknown_field", "send kind, value, reason and optionally expires_days")
+        if set(data) - {"kind", "value", "reason", "expires_days", "list"}:
+            raise ValidationFailure(400, "unknown_field", "send kind, value, reason and optionally expires_days and list")
+        list_name = data.get("list", "deny")
+        if list_name not in LISTS:
+            raise ValidationFailure(400, "invalid_request", f"list must be one of {list(LISTS)}")
         if data.get("kind") not in DENY_KINDS:
             raise ValidationFailure(400, "invalid_request", f"kind must be one of {list(DENY_KINDS)}")
         reason = data.get("reason")
@@ -680,8 +713,9 @@ def register(app, *, bo, api_key, registry, dev_mode):
         if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= DENY_MAX_DAYS):
             raise ValidationFailure(400, "invalid_request", f"expires_days must be a whole number from 1 to {DENY_MAX_DAYS}")
         expires = bo.now_ms() + days * 86_400_000 if days else None
-        row = bo.deny_add(data["kind"], data.get("value"), reason.strip(), user["username"], expires)
-        bo.audit(user["username"], "deny_add", f"{row['kind']}:{row['label']}", {"reason": row["reason"], "expires_days": days})
+        row = bo.deny_add(data["kind"], data.get("value"), reason.strip(), user["username"], expires, list_name)
+        bo.audit(user["username"], "deny_add", f"{row['kind']}:{row['label']}",
+                 {"list": list_name, "reason": row["reason"], "expires_days": days})
         return jsonify({"entries": bo.deny_entries()}), 201
 
     @app.delete("/v1/bo/deny-list/<int:entry_id>")
@@ -690,13 +724,14 @@ def register(app, *, bo, api_key, registry, dev_mode):
         row = bo.deny_remove(entry_id)
         if row is None:
             raise ValidationFailure(404, "unknown_entry", "no such deny-list entry")
-        bo.audit(user["username"], "deny_remove", f"{row['kind']}:{row['label']}", {"reason": row["reason"]})
+        bo.audit(user["username"], "deny_remove", f"{row['kind']}:{row['label']}", {"list": row["list"], "reason": row["reason"]})
         return jsonify({"entries": bo.deny_entries()})
 
     # rules
     def rules_view():
         return {"weights": dict(config.WEIGHTS), "bands": dict(config.BANDS["default"]),
-                "defaults": bo.defaults, "score_max": config.SCORE_MAX}
+                "journey_bands": {j: dict(b) for j, b in config.BANDS.items() if j != "default"},
+                "journeys": list(config.EVENT_TYPES), "defaults": bo.defaults, "score_max": config.SCORE_MAX}
 
     @app.get("/v1/bo/rules")
     def bo_rules():
@@ -706,12 +741,21 @@ def register(app, *, bo, api_key, registry, dev_mode):
     @app.put("/v1/bo/rules")
     def bo_rules_update():
         user = need("admin")
-        weights, new_bands = validate_rules(body())
+        data = body()
+        journey_bands = validate_journey_bands(data.pop("journey_bands", None))
+        weights, new_bands = validate_rules(data)
         before = {"weights": {k: config.WEIGHTS[k] for k in weights}, "bands": dict(config.BANDS["default"])}
+        after = {"weights": weights, "bands": new_bands}
         config.WEIGHTS.update(weights)
         config.BANDS["default"].update(new_bands)
+        if journey_bands is not None:
+            before["journey_bands"] = {j: dict(b) for j, b in config.BANDS.items() if j != "default"}
+            after["journey_bands"] = journey_bands
+            for journey in [j for j in config.BANDS if j != "default"]:
+                del config.BANDS[journey]
+            config.BANDS.update({j: dict(b) for j, b in journey_bands.items()})
         bo.save_rules()
-        bo.audit(user["username"], "rules_update", "rules", {"before": before, "after": {"weights": weights, "bands": new_bands}})
+        bo.audit(user["username"], "rules_update", "rules", {"before": before, "after": after})
         return jsonify(rules_view())
 
     @app.post("/v1/bo/rules/preview")
@@ -721,6 +765,64 @@ def register(app, *, bo, api_key, registry, dev_mode):
         weights, new_bands = validate_rules(body())
         limit = _limit(request.args.get("limit"), 2000)
         return jsonify(replay(bo, weights, new_bands, limit))
+
+    # the bank's own rules (customrules.py): shadow first, a second person for anything live
+    custom = bo.custom
+
+    def rule_change(action, rule, extra=None):
+        bo.audit(g.user["username"], action, "rule:" + rule["name"], extra)
+        return jsonify({"rule": rule, "rules": custom.all()})
+
+    @app.get("/v1/bo/custom-rules")
+    def bo_custom_rules():
+        need("viewer")
+        variables = [{"name": n, "type": t, "about": d} for n, (t, d) in rulelang.VARIABLES.items()]
+        return jsonify({"rules": custom.all(), "variables": variables, "floors": list(customrules.FLOORS),
+                        "journeys": list(config.EVENT_TYPES), "report": customrules.shadow_report(bo)})
+
+    @app.post("/v1/bo/custom-rules")
+    def bo_custom_rule_create():
+        user = need("analyst")
+        rule = custom.create(customrules.validate(body(), need_name=True), user["username"])
+        bo.audit(user["username"], "rule_create", "rule:" + rule["name"],
+                 {"expression": rule["expression"], "points": rule["points"], "floor": rule["floor"],
+                  "asked_to_go_live": rule["pending"] is not None})
+        return jsonify({"rule": rule, "rules": custom.all()}), 201
+
+    @app.post("/v1/bo/custom-rules/test")
+    def bo_custom_rule_test():
+        """Check a draft condition and run it over stored decisions. Changes nothing."""
+        need("viewer")
+        data = body()
+        draft = customrules.validate({"description": "draft", **{k: data[k] for k in ("expression", "points", "floor", "journeys") if k in data}},
+                                     need_name=False)
+        tree = rulelang.compile_rule(draft["expression"])
+        result = customrules.backtest(bo, draft["expression"], draft["journeys"], draft["points"], draft["floor"],
+                                      _limit(request.args.get("limit"), 2000))
+        result["names_used"] = sorted(rulelang.names_used(tree))
+        return jsonify(result)
+
+    @app.put("/v1/bo/custom-rules/<int:rule_id>")
+    def bo_custom_rule_update(rule_id):
+        user = need("analyst")
+        before = custom.view(custom.get(rule_id))
+        rule, outcome = custom.update(rule_id, customrules.validate(body(), need_name=False), user["username"])
+        return rule_change("rule_update" if outcome == "applied" else "rule_request", rule,
+                           {"outcome": outcome, "before": {k: before[k] for k in customrules.FIELDS},
+                            "asked": rule["pending"] or {k: rule[k] for k in customrules.FIELDS}})
+
+    @app.post("/v1/bo/custom-rules/<int:rule_id>/<action>")
+    def bo_custom_rule_action(rule_id, action):
+        if action not in ("approve", "reject", "retire", "restore"):
+            raise ValidationFailure(404, "not_found", "no such endpoint")
+        user = need("admin")
+        if action == "approve":
+            rule, pending = custom.approve(rule_id, user["username"])
+            return rule_change("rule_approve", rule, {"requested_by": pending["requested_by"], "mode": rule["mode"]})
+        if action == "reject":
+            rule, pending = custom.reject(rule_id, user["username"])
+            return rule_change("rule_reject", rule, {"requested_by": pending["requested_by"]})
+        return rule_change("rule_" + action, custom.retire(rule_id, user["username"], retired=action == "retire"))
 
     # retention and erasure
     @app.post("/v1/bo/maintenance/purge")
@@ -976,6 +1078,25 @@ def validate_rules(data):
     return weights, new_bands
 
 
+def validate_journey_bands(data):
+    """Bands for single journeys: {journey: {step_up_from, block_from}}. A journey left out uses the default."""
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValidationFailure(400, "invalid_request", "journey_bands must be an object")
+    out = {}
+    for journey, bands in data.items():
+        if journey not in config.EVENT_TYPES:
+            raise ValidationFailure(400, "invalid_request", f"unknown journey {journey}")
+        if not isinstance(bands, dict) or set(bands) != {"step_up_from", "block_from"} or any(
+                isinstance(v, bool) or not isinstance(v, int) for v in bands.values()):
+            raise ValidationFailure(400, "invalid_request", f"{journey} needs whole numbers for step_up_from and block_from")
+        if not 1 <= bands["step_up_from"] < bands["block_from"] <= config.SCORE_MAX:
+            raise ValidationFailure(400, "invalid_request", f"{journey}: bands must satisfy 1 <= step_up_from < block_from <= 1000")
+        out[journey] = {"step_up_from": bands["step_up_from"], "block_from": bands["block_from"]}
+    return out
+
+
 def rescore(record, weights, bands):
     """Score one stored decision again from its reason codes under draft weights and bands.
 
@@ -988,7 +1109,8 @@ def rescore(record, weights, bands):
         return record["risk_score"], record["risk_level"]
     reasons = [item["reason"] for item in record.get("score_breakdown", []) if item["reason"] in config.WEIGHTS]
     w = dict(config.WEIGHTS); w.update(weights)
-    score = min(config.SCORE_MAX, sum(w[r] for r in reasons))
+    custom = sum(item["points"] for item in record.get("score_breakdown", []) if item.get("custom"))  # as decided at the time
+    score = min(config.SCORE_MAX, sum(w[r] for r in reasons) + custom)
     if score < config.FORCE_STEP_UP_MIN_SCORE and any(r in reasons for r in FORCE_STEP_UP_REASONS):
         score = config.FORCE_STEP_UP_MIN_SCORE
     level = "BLOCK" if score >= bands["block_from"] else ("STEP_UP" if score >= bands["step_up_from"] else "ALLOW")

@@ -24,18 +24,28 @@
     "threshold": null,
     "top_features": []
   },
-  "model_version": "rules-0.3.0+baseline-1+ml-1",
+  "model_version": "rules-0.4.0+baseline-1+ml-1",
+  "payee_lists": [],
   "reason_codes": [],
   "risk_level": "ALLOW",
   "risk_score": 0,
   "score_breakdown": [],
   "scoring_mode": "RULES_ONLY",
   "session_id": "sess_jwnjlqxq9o98",
+  "shadow_rules": [],
   "signals_used": "ENVIRONMENT_AND_BEHAVIOR",
   "threat_details": {
     "bot_probability": 0.0,
     "coercion_scam_probability": 0.0,
     "rat_detected": false,
     "user_biometric_match_score": null
+  },
+  "velocity": {
+    "amount_24h": 250000.0,
+    "device_customers_7d": 1,
+    "distinct_payees_7d": 1,
+    "new_payees_24h": 0,
+    "payee_customers_7d": 0,
+    "payments_24h": 1
   }
 }

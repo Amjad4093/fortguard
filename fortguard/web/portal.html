@@ -297,7 +297,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     <div class="group">Manage</div>
     <a href="#/devices" data-page="devices">Devices</a>
     <a href="#/rules" data-page="rules">Rules</a>
-    <a href="#/deny" data-page="deny">Deny list</a>
+    <a href="#/custom" data-page="custom">Bank rules <span class="count hidden" id="nav-pending"></span></a>
+    <a href="#/deny" data-page="deny">Lists</a>
     <a href="#/users" data-page="users" class="admin-only">Users</a>
     <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
     <div class="spacer"></div>
@@ -321,7 +322,9 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   var ACTION_TEXT = { login: "signed in", login_failed: "failed sign-in", logout: "signed out", case_update: "updated case", note_add: "added a note",
     device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios",
     feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data",
-    deny_add: "added to the deny list", deny_remove: "removed from the deny list" };
+    deny_add: "added to a list", deny_remove: "removed from a list", rule_create: "wrote a bank rule", rule_update: "changed a shadow rule",
+    rule_request: "asked for a rule change", rule_approve: "approved a rule change", rule_reject: "rejected a rule change",
+    rule_retire: "retired a bank rule", rule_restore: "restored a bank rule" };
 
   try { S.token = sessionStorage.getItem("fg_token"); } catch (e) { /* ignore */ }
 
@@ -345,7 +348,10 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     if (b.status === "LEARNING") return "learning (" + b.sessions + " of " + b.required + " sessions)" + (b.match_score_preview != null ? ", preview match " + Math.round(b.match_score_preview * 100) + "% (not used yet)" : "");
     return "match " + (b.match_score != null ? Math.round(b.match_score * 100) + "%" : "n/a") + " against " + b.sessions + " sessions" + (b.least_typical_features && b.least_typical_features.length ? "; least typical: " + b.least_typical_features.map(function (f) { return f.replace(/^ft_/, "").replace(/_/g, " "); }).join(", ") : "");
   }
-  function reasonText(code) { return (FGCore.REASONS[code] || code); }
+  function reasonText(code) {
+    if (code.indexOf("CUSTOM_") === 0) return "Bank rule: " + code.slice(7).toLowerCase().replace(/_/g, " ");
+    return (FGCore.REASONS[code] || code);
+  }
   function short(s, n) { return s && s.length > n ? s.slice(0, n) + "…" : (s || "–"); }
   function say(t, err) { var m = $("msg"); m.textContent = t || ""; m.className = "msg" + (err ? " err" : ""); }
   function can(role) { var r = ["viewer", "analyst", "admin"]; return S.user && r.indexOf(S.user.role) >= r.indexOf(role); }
@@ -406,6 +412,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   }
   async function refreshCount() {
     try { var c = await call("GET", "/v1/bo/cases?limit=1"); var n = c.counts.OPEN; var b = $("nav-open"); b.textContent = n; b.classList.toggle("hidden", !n); } catch (e) { /* ignore */ }
+    try { var cr = await call("GET", "/v1/bo/custom-rules"); var w = cr.rules.filter(function (x) { return x.pending; }).length; var pb = $("nav-pending"); pb.textContent = w; pb.classList.toggle("hidden", !w); } catch (e) { /* ignore */ }
   }
 
   // --- routing ---------------------------------------------------------------------------------------
@@ -419,7 +426,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var v = $("view"); v.innerHTML = "";
     var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
       customers: parts[1] ? function (x) { return customerDetail(x, decodeURIComponent(parts[1])); } : customers,
-      devices: devices, rules: rules, deny: denyList, users: users, audit: audit };
+      devices: devices, rules: rules, custom: customRules, deny: denyList, users: users, audit: audit };
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
@@ -430,7 +437,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     "Decisions": "Every decision, newest first. Numbers only, never typed text.",
     "Devices": "Phones that have enrolled with FortGuard. Revoke a device to stop it sending data.",
     "Rules": "Points for each signal, and the score bands that decide allow, step-up and block.",
-    "Deny list": "Customers, devices, payee accounts and network addresses the bank has decided to block. A match blocks the decision whatever else the session looks like.",
+    "Lists": "Deny list: blocked outright. Suspected mules: payee accounts that step up alone and block with another signal. Trusted payees: accounts never treated as a new payee.",
+    "Bank rules": "Your own rules, on top of the built-in ones. A new rule runs in shadow first: it is recorded but changes nothing. Going live needs a second admin.",
     "Users": "Who can sign in to this back office, and what each role may do.",
     "Audit log": "A record of every change and sign-in. Entries cannot be edited."
   };
@@ -756,6 +764,27 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     return card("Device and environment", kids);
   }
 
+  // How busy this customer, phone and payee account have been, counting the decision shown.
+  function velocityCard(d) {
+    var v = d.velocity;
+    if (!v) return null;
+    var lists = (d.payee_lists || []).map(function (l) { return l === "mule" ? "Suspected-mule list" : "Trusted list"; }).concat((d.deny_list || []).length ? ["Deny list (" + d.deny_list.join(", ") + ")"] : []);
+    return card("Recent activity", [el("p", { class: "hint", text: "Counted from the requests FortGuard has decided, including this one." }), kvList([
+      ["Payments by this customer, 24 hours", String(v.payments_24h)], ["Amount paid, 24 hours", money(v.amount_24h, d.currency)],
+      ["New payees, 24 hours", String(v.new_payees_24h)], ["Different payees, 7 days", String(v.distinct_payees_7d)],
+      ["Customers on this phone, 7 days", String(v.device_customers_7d)], ["Customers who added this payee as new, 7 days", String(v.payee_customers_7d)],
+      ["On a bank list", lists.length ? lists.join(", ") : "No"]])]);
+  }
+  // Bank rules still in shadow that fired on this decision: recorded, with what they would have done.
+  function shadowCard(d) {
+    var hits = d.shadow_rules || [];
+    if (!hits.length) return null;
+    return card("Shadow rules that fired", [el("p", { class: "hint", text: "These bank rules are being tried out. They did not change this decision." })].concat(hits.map(function (h) {
+      return el("div", { class: "why" }, [el("div", {}, [el("div", { text: h.rule.replace(/_/g, " ") }), el("code", { text: h.rule })]),
+        el("span", {}, [pill(h.would_level, "would be " + h.would_level.replace("_", " ").toLowerCase() + " · " + h.would_score)])]);
+    })));
+  }
+
   // The per-case measurement panels: what was captured, typing, touch positions, and the device.
   function measurementCards(d) {
     return [signalCard(d), typingCard(d), touchCard(d), deviceCard(d)];
@@ -879,7 +908,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
      ["Signals used", d.signals_used + (d.degraded ? " (degraded mode)" : "")], ["Opened", when(c.created_ms)], ["Model", d.model_version]]
       .forEach(function (p) { facts.appendChild(el("dt", { text: p[0] })); facts.appendChild(el("dd", { text: p[1] || "–" })); });
 
-    var left = [decisionCard(d), ownerCallout(d), card("Why FortGuard flagged it", why), mlCard(d.ml), card("Details", [facts])];
+    var left = [decisionCard(d), ownerCallout(d), card("Why FortGuard flagged it", why), shadowCard(d), mlCard(d.ml), card("Details", [facts]), velocityCard(d)];
     left = left.concat(measurementCards(d));
     if (c.other_sessions.length) left.push(card("Other cases for this user", [el("table", {}, [el("tbody", {}, c.other_sessions.map(function (o) {
       return el("tr", { class: "link", onclick: function () { location.hash = "#/cases/" + o.id; } }, [el("td", { text: "#" + o.id }), el("td", {}, [pill(o.status)]), el("td", {}, [pill(o.risk_level)]), el("td", { text: String(o.risk_score) })]);
@@ -1020,6 +1049,125 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
         row("step_up_from", "Step-up from", r.bands.step_up_from, bandDef.step_up_from, 1, r.score_max), row("block_from", "Block from", r.bands.block_from, bandDef.block_from, 1, r.score_max),
         el("p", { class: "msg", text: "Every change is recorded in the audit log with the old and new values." })])
     ]));
+
+    // Bands for a single journey. Blank means the journey uses the default bands above.
+    var jb = {};
+    var jrows = r.journeys.map(function (j) {
+      var cur = r.journey_bands[j] || {};
+      function box(key, label) {
+        var inp = el("input", { type: "number", min: "1", max: String(r.score_max), step: "1", placeholder: "default", value: cur[key] != null ? String(cur[key]) : "", "aria-label": label + " for " + j, style: "width:110px" });
+        if (!admin) inp.disabled = true;
+        return inp;
+      }
+      jb[j] = [box("step_up_from", "Step-up from"), box("block_from", "Block from")];
+      return el("tr", {}, [el("td", { text: JOURNEY_TEXT[j] || j }), el("td", {}, [jb[j][0]]), el("td", {}, [jb[j][1]])]);
+    });
+    var saveJ = admin ? el("button", { class: "primary", type: "button", text: "Save journey bands", onclick: async function () {
+      var out = {};
+      for (var j in jb) {
+        var a = jb[j][0].value, b = jb[j][1].value;
+        if (a === "" && b === "") continue;
+        if (a === "" || b === "") { say((JOURNEY_TEXT[j] || j) + ": fill both numbers, or leave both blank.", true); return; }
+        out[j] = { step_up_from: parseInt(a, 10), block_from: parseInt(b, 10) };
+      }
+      try { await call("PUT", "/v1/bo/rules", { journey_bands: out }); say("Journey bands saved."); route(); } catch (e) { say(e.message, true); }
+    } }) : null;
+    v.appendChild(el("section", { class: "card", style: "margin-top:14px" }, [el("h2", { text: "Bands for one journey" }), el("div", { class: "body" }, [
+      el("p", { class: "msg", text: "Give a journey its own bands when the same score should mean something stricter or looser there. Leave both boxes blank to use the default bands." }),
+      el("table", {}, [el("thead", {}, [el("tr", {}, ["Journey", "Step-up from", "Block from"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, jrows)]),
+      el("div", { class: "toolbar", style: "margin-top:12px" }, [saveJ])])]));
+  }
+  var JOURNEY_TEXT = { LOGIN: "Sign-in", ADD_PAYEE: "Add a payee", FUNDS_TRANSFER: "Payment", PROFILE_CHANGE: "Change phone, e-mail or password",
+    SIGN_UP: "Sign-up", DEVICE_ENROLLMENT: "Add a new phone" };
+
+  // --- bank rules --------------------------------------------------------------------------------------------------
+  async function customRules(v) {
+    head(v, "Bank rules");
+    var data = await call("GET", "/v1/bo/custom-rules");
+    var editing = null;
+    var name = el("input", { placeholder: "rule_name", "aria-label": "Rule name", autocomplete: "off", style: "min-width:200px" });
+    var about = el("input", { placeholder: "what the rule is for", "aria-label": "Description", autocomplete: "off", style: "min-width:320px;flex:1" });
+    var cond = el("textarea", { placeholder: "tx.amount >= 500000 and tx.is_new_payee and env.in_call", "aria-label": "Condition", spellcheck: "false", class: "mono" });
+    var points = el("input", { type: "number", min: "0", max: "1000", step: "1", value: "200", "aria-label": "Points to add", style: "width:110px" });
+    var floor = el("select", { "aria-label": "Lift the decision to at least" }, [el("option", { value: "NONE", text: "No floor" }), el("option", { value: "STEP_UP", text: "At least step-up" }), el("option", { value: "BLOCK", text: "At least block" })]);
+    var mode = el("select", { "aria-label": "Mode" }, [el("option", { value: "shadow", text: "Shadow (record only)" }), el("option", { value: "live", text: "Ask to go live" })]);
+    var jboxes = data.journeys.map(function (j) { var c = el("input", { type: "checkbox", value: j, id: "cj-" + j }); return [c, el("label", { for: "cj-" + j, text: " " + (JOURNEY_TEXT[j] || j) + "  " })]; });
+    var result = el("div");
+    var title = el("h2", { text: "Write a rule" });
+    function draft() {
+      var d = { description: about.value, expression: cond.value, points: parseInt(points.value || "0", 10), floor: floor.value,
+        journeys: jboxes.filter(function (b) { return b[0].checked; }).map(function (b) { return b[0].value; }), mode: mode.value };
+      if (!editing) d.name = name.value;
+      return d;
+    }
+    function load(rule) {
+      editing = rule; title.textContent = rule ? "Change " + rule.name : "Write a rule";
+      name.value = rule ? rule.name : ""; name.disabled = !!rule; about.value = rule ? rule.description : ""; cond.value = rule ? rule.expression : "";
+      points.value = rule ? rule.points : 200; floor.value = rule ? rule.floor : "NONE"; mode.value = rule ? rule.mode : "shadow";
+      jboxes.forEach(function (b) { b[0].checked = !!rule && rule.journeys.indexOf(b[0].value) >= 0; });
+      result.innerHTML = ""; window.scrollTo(0, 0);
+    }
+    var tryIt = el("button", { type: "button", text: "Try on past decisions", onclick: async function () {
+      result.innerHTML = "";
+      try {
+        var d = draft();
+        var t = await call("POST", "/v1/bo/custom-rules/test", { expression: d.expression, points: d.points, floor: d.floor, journeys: d.journeys });
+        var moves = Object.keys(t.would_change).map(function (k) { return t.would_change[k] + " " + k.replace("->", " → ").replace(/_/g, " ").toLowerCase(); });
+        result.appendChild(el("div", { class: "callout info" }, [el("b", { text: "Fired on " + t.hits + " of " + t.decisions + " past decisions (" + (t.hit_rate * 100).toFixed(1) + "%), " + t.customers + " customers" }),
+          el("span", { text: (moves.length ? "Would change: " + moves.join(", ") + ". " : "Would not change any of those decisions. ") +
+            "Confirmed fraud among the hits: " + t.confirmed_fraud_hits + ". Confirmed genuine: " + t.confirmed_genuine_hits + "." +
+            (t.without_facts ? " " + t.without_facts + " older decisions could not be checked." : "") })]));
+        say("");
+      } catch (e) { say(e.message, true); }
+    } });
+    var saveBtn = el("button", { class: "primary", type: "button", text: "Save rule", onclick: async function () {
+      try {
+        var out = editing ? await call("PUT", "/v1/bo/custom-rules/" + editing.id, draft()) : await call("POST", "/v1/bo/custom-rules", draft());
+        say(out.rule.pending ? "Saved. It runs in shadow until another admin approves the request." : "Saved."); route();
+      } catch (e) { say(e.message, true); }
+    } });
+    var cancel = el("button", { type: "button", text: "Clear", onclick: function () { load(null); } });
+    var names = el("details", {}, [el("summary", { text: "Names you can use (" + data.variables.length + ")" }),
+      el("table", {}, [el("tbody", {}, data.variables.map(function (x) {
+        return el("tr", { class: "link", title: "Add to the condition", onclick: function () { cond.value += (cond.value && !/\s$/.test(cond.value) ? " " : "") + x.name; cond.focus(); } },
+          [el("td", { class: "mono", text: x.name }), el("td", { text: x.type }), el("td", { style: "white-space:normal", text: x.about })]);
+      }))])]);
+    if (can("analyst")) {
+      v.appendChild(el("section", { class: "card" }, [title, el("div", { class: "body" }, [
+        el("div", { class: "toolbar" }, [name, about]), cond,
+        el("p", { class: "msg", text: "Join conditions with and, or, not. Compare with == != > >= < <=. Use in (\"A\", \"B\") for lists. A name with no value for a decision never makes the rule fire." }),
+        el("div", { class: "toolbar" }, [el("label", { text: "Points " }), points, floor, mode]),
+        el("div", { class: "toolbar" }, [el("span", { text: "Journeys (none ticked = all): " })].concat([].concat.apply([], jboxes))),
+        el("div", { class: "toolbar" }, [tryIt, saveBtn, cancel]), result, names])]));
+    }
+    var report = data.report.rules;
+    var rows = data.rules.map(function (r) {
+      var rep = report[r.name] || { shadow_hits: 0, live_hits: 0, would_change: {} };
+      var status = r.retired ? pill("GREY", "Retired") : (r.mode === "live" ? pill("BLOCK", "Live") : pill("ALLOW", "Shadow"));
+      var waiting = r.pending ? el("div", {}, [el("small", { text: "Waiting for another admin: " + (r.pending.mode === "live" && r.mode !== "live" ? "go live" : "change") + ", asked by " + r.pending.requested_by })]) : null;
+      var moves = Object.keys(rep.would_change).map(function (k) { return rep.would_change[k] + " " + k.replace("->", " → ").replace(/_/g, " ").toLowerCase(); });
+      function act(label, action, ask) {
+        return el("button", { type: "button", text: label, onclick: async function () {
+          if (ask && !confirm(ask)) return;
+          try { await call("POST", "/v1/bo/custom-rules/" + r.id + "/" + action); say("Done."); route(); refreshCount(); } catch (e) { say(e.message, true); }
+        } });
+      }
+      var buttons = [];
+      if (can("analyst") && !r.retired) buttons.push(el("button", { type: "button", text: "Edit", onclick: function () { load(r); } }));
+      if (can("admin") && r.pending) buttons.push(act("Approve", "approve"), act("Reject", "reject"));
+      if (can("admin")) buttons.push(r.retired ? act("Restore", "restore") : act("Retire", "retire", "Retire " + r.name + "? It stops at once."));
+      return el("tr", {}, [
+        el("td", { style: "white-space:normal;min-width:200px" }, [el("div", { text: r.description }), el("small", { class: "mono", text: r.name }), waiting]),
+        el("td", { style: "white-space:normal;min-width:260px" }, [el("code", { text: r.expression })]),
+        el("td", { text: "+" + r.points + (r.floor !== "NONE" ? ", at least " + r.floor.replace("_", " ").toLowerCase() : "") }),
+        el("td", { style: "white-space:normal", text: r.journeys.length ? r.journeys.map(function (j) { return JOURNEY_TEXT[j] || j; }).join(", ") : "All" }),
+        el("td", {}, [status]),
+        el("td", { style: "white-space:normal", text: (r.mode === "live" ? rep.live_hits + " live" : rep.shadow_hits + " in shadow") + (moves.length ? "; would change " + moves.join(", ") : "") }),
+        el("td", {}, [].concat.apply([], buttons.map(function (b) { return [b, " "]; })))]);
+    });
+    v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {},
+      ["Rule", "Condition", "Adds", "Journeys", "Status", "Fired (last " + data.report.decisions + " decisions)", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+      rows.length ? null : el("div", { class: "empty", text: "No bank rules yet. The built-in rules are on the Rules page." })]));
   }
 
   function showImpact(box, p) {
@@ -1073,34 +1221,37 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
 
   // --- deny list ---------------------------------------------------------------------------------------------------
   var DENY_KIND = { customer: "Customer ID", device: "Device ID", account: "Payee account", ip: "Network address (IP)" };
+  var LIST_NAME = { deny: ["BLOCK", "Deny"], mule: ["STEP_UP", "Suspected mule"], allow: ["ALLOW", "Trusted payee"] };
   async function denyList(v) {
-    head(v, "Deny list");
+    head(v, "Lists");
     var data = await call("GET", "/v1/bo/deny-list");
     if (can("analyst")) {
-      var kind = el("select", { "aria-label": "What to block" }, data.kinds.map(function (k) { return el("option", { value: k, text: DENY_KIND[k] || k }); }));
+      var kind = el("select", { "aria-label": "What to list" }, data.kinds.map(function (k) { return el("option", { value: k, text: DENY_KIND[k] || k }); }));
       kind.value = "account";
-      var value = el("input", { placeholder: "value to block", "aria-label": "Value to block", autocomplete: "off", style: "min-width:260px" });
+      var list = el("select", { "aria-label": "Which list" }, data.lists.map(function (l) { return el("option", { value: l, text: LIST_NAME[l][1] + " list" }); }));
+      list.addEventListener("change", function () { if (list.value !== "deny") kind.value = "account"; });
+      var value = el("input", { placeholder: "value", "aria-label": "Value to list", autocomplete: "off", style: "min-width:260px" });
       var reason = el("input", { placeholder: "why (shown in the audit log)", "aria-label": "Reason", autocomplete: "off", style: "min-width:260px" });
       var days = el("input", { type: "number", min: "1", max: "3650", placeholder: "days (optional)", "aria-label": "Days until the entry expires", title: "Leave blank for no end date", style: "width:150px" });
-      v.appendChild(card("Add an entry", [el("div", { class: "toolbar" }, [kind, value, reason, days, el("button", { class: "primary", type: "button", text: "Block", onclick: async function () {
-        var body = { kind: kind.value, value: value.value, reason: reason.value };
+      v.appendChild(card("Add an entry", [el("div", { class: "toolbar" }, [list, kind, value, reason, days, el("button", { class: "primary", type: "button", text: "Add", onclick: async function () {
+        var body = { kind: kind.value, value: value.value, reason: reason.value, list: list.value };
         if (days.value) body.expires_days = Number(days.value);
-        try { await call("POST", "/v1/bo/deny-list", body); say("Added to the deny list."); route(); } catch (e) { say(e.message, true); }
+        try { await call("POST", "/v1/bo/deny-list", body); say("Added."); route(); } catch (e) { say(e.message, true); }
       } })]), el("p", { class: "msg", text: "A payee account is stored as a one-way fingerprint and shown by its last four characters only. Spaces and letter case do not matter when matching." })]));
     }
     var rows = data.entries.map(function (d) {
       var remove = can("analyst") ? el("button", { type: "button", text: "Remove", onclick: async function () {
-        if (!confirm("Remove " + d.label + " from the deny list?")) return;
+        if (!confirm("Remove " + d.label + " from the " + LIST_NAME[d.list][1].toLowerCase() + " list?")) return;
         try { await call("DELETE", "/v1/bo/deny-list/" + d.id); say("Removed."); route(); } catch (e) { say(e.message, true); }
       } }) : null;
-      return el("tr", {}, [el("td", { text: DENY_KIND[d.kind] || d.kind }), el("td", { class: "mono", text: d.label }),
+      return el("tr", {}, [el("td", {}, [pill(LIST_NAME[d.list][0], LIST_NAME[d.list][1])]), el("td", { text: DENY_KIND[d.kind] || d.kind }), el("td", { class: "mono", text: d.label }),
         el("td", { style: "white-space:normal;min-width:200px", text: d.reason }), el("td", { text: d.added_by }), el("td", { text: when(d.created_ms) }),
         el("td", {}, [d.expires_ms ? (d.expired ? pill("GREY", "Expired") : document.createTextNode(when(d.expires_ms))) : document.createTextNode("No end date")]),
         el("td", {}, [remove])]);
     });
     v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {},
-      ["Blocked", "Value", "Reason", "Added by", "Added", "Expires", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
-      rows.length ? null : el("div", { class: "empty", text: "Nothing is on the deny list." })]));
+      ["List", "What", "Value", "Reason", "Added by", "Added", "Expires", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)]),
+      rows.length ? null : el("div", { class: "empty", text: "Nothing is on any list." })]));
   }
 
   // --- audit -------------------------------------------------------------------------------------------------------

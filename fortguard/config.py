@@ -5,13 +5,17 @@ None of them is calibrated on real traffic. They are meant to be tuned in shadow
 """
 
 # --- Journeys and decisions -------------------------------------------------
-EVENT_TYPES = ("LOGIN", "ADD_PAYEE", "FUNDS_TRANSFER")
-SENSITIVE_EVENTS = ("ADD_PAYEE", "FUNDS_TRANSFER")
+EVENT_TYPES = ("LOGIN", "ADD_PAYEE", "FUNDS_TRANSFER", "PROFILE_CHANGE", "SIGN_UP", "DEVICE_ENROLLMENT")
+# Journeys that name a payee account: transaction_details is required and the payee rules apply.
+PAYMENT_EVENTS = ("ADD_PAYEE", "FUNDS_TRANSFER")
+# Journeys a fraudster on the phone, or watching the screen, would steer: the call and screen-sharing
+# rules apply. Changing the phone number, e-mail or password on the account is one of them.
+SENSITIVE_EVENTS = PAYMENT_EVENTS + ("PROFILE_CHANGE",)
 
 SCORE_MAX = 1000
 
 # Starting bands from PRD section 6: ALLOW 0-599, STEP_UP 600-899, BLOCK 900-1000.
-# Bands can be set per journey; every journey uses the default for now.
+# A journey can have its own bands (set in the back office); without them it uses the default.
 BANDS = {"default": {"step_up_from": 600, "block_from": 900}}
 
 ACTIONS = {
@@ -50,6 +54,14 @@ WEIGHTS = {
     "REASON_ON_DENY_LIST": 1000,
     "REASON_SIM_CHANGED": 150,
     "REASON_SIM_SWAP_PATTERN": 300,
+    # The payee account is on the bank's suspected-mule list. Enough for a step-up alone, and a block
+    # with almost any other signal. A confirmed mule belongs on the deny list instead.
+    "REASON_SUSPECTED_MULE_ACCOUNT": 700,
+    # Velocity (fortguard/velocity.py). Counted from the requests FortGuard has been asked to decide.
+    "REASON_VELOCITY_MANY_PAYMENTS": 200,
+    "REASON_VELOCITY_MANY_NEW_PAYEES": 250,
+    "REASON_DEVICE_USED_BY_MANY_CUSTOMERS": 300,
+    "REASON_PAYEE_PAID_BY_MANY_CUSTOMERS": 250,
     "REASON_SCRIPTED_INPUT": 500,
     "REASON_PERFECT_LINEAR_SWIPES": 350,
     "REASON_NO_PHYSICAL_MOTION": 300,
@@ -93,6 +105,12 @@ HESITATION_FULL_MS = 10000        # counted pause time that maps to an index of 
 HESITATION_IGNORED_FIELDS = frozenset({"username", "password", "otp"})
 HESITATION_FLAG = 0.6             # index at or above this is flagged
 TREMOR_BAND_HZ = (4.0, 12.0)
+
+# --- Velocity thresholds (judgement calls, not measured on real customers) ---------
+VELOCITY_PAYMENTS_24H = 15          # payments by one customer in 24 hours, counting the one being decided
+VELOCITY_NEW_PAYEES_24H = 3         # new payees used by one customer in 24 hours
+VELOCITY_DEVICE_CUSTOMERS_7D = 3    # different customers on one phone in 7 days
+VELOCITY_PAYEE_CUSTOMERS_7D = 3     # different customers paying one account that is new to each of them, in 7 days
 
 # --- Sessions and requests -------------------------------------------------------
 SESSION_TTL_S = 1800
@@ -158,4 +176,4 @@ MAX_CHALLENGES = 100_000
 ALLOWED_APP_IDS = ("com.example.mobilebank",)  # replace with the pilot app's package and bundle IDs
 PLATFORMS = ("Android", "iOS", "Web")  # "Web" is the browser test client only
 
-MODEL_VERSION = "rules-0.3.0+baseline-1+ml-1"
+MODEL_VERSION = "rules-0.4.0+baseline-1+ml-1"
