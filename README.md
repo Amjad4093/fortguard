@@ -134,6 +134,11 @@ Each response carries `baseline`: the user's behavioral baseline status (`NONE`,
 allowed sessions, `MATURE`), and once mature the biometric match score (0 to 1) that also appears as
 `threat_details.user_biometric_match_score`. A mature match below 0.35 adds `REASON_BEHAVIORAL_ANOMALY_HIGH`.
 
+Each response also carries `ml`: the per-customer machine-learning anomaly model (`fortguard/mlmodel.py`).
+It is `LEARNING` below 10 allowed sessions and `ACTIVE` after that, when `scoring_mode` becomes
+`RULES_AND_ML`. A session unlike the customer's own past sessions adds `REASON_ML_BEHAVIOR_ANOMALY`.
+What the model is, the evidence for it and its limits are in [docs/ML.md](docs/ML.md).
+
 Every response has an `X-Request-ID` and security headers. Rate limits per minute: sign-in 20 and device
 challenges 30 per client IP, telemetry 240 per device, evaluate 6000 per API key (`config.RATE_LIMITS`).
 

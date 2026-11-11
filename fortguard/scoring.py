@@ -1,10 +1,12 @@
-"""Rules-only scoring: features and flags in, a 0 to 1000 score, a level and reason codes out.
+"""Scoring: features and flags in, a 0 to 1000 score, a level and reason codes out.
 
-No machine learning in this slice. The shape of the answer matches the BRD so that models can
-replace the rules behind the same contract later (backlog items E3-02 to E3-08).
+Most of the score comes from fixed, readable rules. Two per-customer checks add to it once a customer
+has enough learned sessions: the statistical baseline (baseline.py) and the machine-learning anomaly
+model (mlmodel.py). Both only ever add a named reason with a fixed weight, so every decision can still
+be explained line by line.
 """
 
-from . import config
+from . import config, mlmodel
 from .features import compute_features
 
 FORCE_STEP_UP_REASONS = (
@@ -111,11 +113,14 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
             feats = compute_features(session)
             reasons.extend(_behavioral_reasons(feats, sensitive))
 
-    baseline = None
+    baseline, ml = None, None
     if baselines is not None and user_id is not None and feats is not None:
         baseline, anomalous = baselines.assess(user_id, feats)
         if anomalous:
             reasons.append("REASON_BEHAVIORAL_ANOMALY_HIGH")
+        ml = baselines.assess_ml(user_id, feats)
+        if ml["anomalous"]:
+            reasons.append("REASON_ML_BEHAVIOR_ANOMALY")
 
     if (
         sensitive
@@ -151,9 +156,11 @@ def score_session(session, event_type, tx, baselines=None, user_id=None):
         },
         "baseline": baseline or {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
                                  "match_score": None, "match_score_preview": None, "least_typical_features": []},
+        "ml": ml or mlmodel.EMPTY,
         "score_breakdown": breakdown,
         "signals_used": "ENVIRONMENT_AND_BEHAVIOR" if feats is not None else "ENVIRONMENT_ONLY",
-        "scoring_mode": "RULES_ONLY",
+        # RULES_AND_ML only when the model was mature enough to give an opinion on this session.
+        "scoring_mode": "RULES_AND_ML" if ml and ml["status"] == "ACTIVE" else "RULES_ONLY",
         "model_version": config.MODEL_VERSION,
         "degraded": False,
         "_features": feats,
@@ -186,6 +193,7 @@ def degraded_decision(event_type, tx, reason):
         "score_breakdown": [{"reason": reason, "points": score}],
         "baseline": {"status": "NONE", "sessions": 0, "required": config.BASELINE_MIN_SESSIONS,
                      "match_score": None, "match_score_preview": None, "least_typical_features": []},
+        "ml": mlmodel.EMPTY,
         "signals_used": "TRANSACTION_ONLY",
         "scoring_mode": "DEGRADED",
         "model_version": config.MODEL_VERSION,

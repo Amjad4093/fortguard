@@ -114,6 +114,8 @@ class DecisionLog:
             "model_version": result["model_version"],
             "latency_ms": result.get("latency_ms"),
             "baseline": result.get("baseline"),
+            "ml": result.get("ml"),
+            "scoring_mode": result.get("scoring_mode"),
             # Numbers only: the behavioural measurements behind this decision, for the back office.
             "features": {k: round(float(v), 4) for k, v in (features or {}).items()
                          if isinstance(v, (int, float)) and not isinstance(v, bool)},

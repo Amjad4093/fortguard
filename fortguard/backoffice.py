@@ -44,7 +44,7 @@ from collections import Counter, defaultdict
 
 from flask import g, jsonify, request
 
-from . import config
+from . import config, mlmodel
 from .admin import SIGNAL_KEYS
 from .schema import ValidationFailure
 
@@ -624,6 +624,14 @@ def register(app, *, bo, api_key, registry, dev_mode):
         status = "MATURE" if n >= config.BASELINE_MIN_SESSIONS else ("LEARNING" if n else "NONE")
         return {"status": status, "sessions": n, "required": config.BASELINE_MIN_SESSIONS, "features": prof["stats"]}
 
+    def _ml_status(baselines, user_id):
+        """Where this customer's machine-learning model stands: still learning, or active and on what."""
+        prof = baselines.profile(user_id)
+        model, n = prof["ml"], prof["sessions"]
+        return {"model": mlmodel.MODEL_NAME, "status": "ACTIVE" if model else ("LEARNING" if n else "NONE"),
+                "sessions": model.sessions if model else n, "required": config.ML_MIN_SESSIONS,
+                "features": list(model.names) if model else []}
+
     @app.get("/v1/bo/customers")
     def bo_customers():
         need("viewer")
@@ -649,7 +657,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
                          "levels": {k: g["levels"][k] for k in ("ALLOW", "STEP_UP", "BLOCK")},
                          "owner": _owner_status(current_app.fortguard_baselines, uid)["status"],
                          "maturity": _maturity(_owner_status(current_app.fortguard_baselines, uid)),
-                         "display_name": names.get(uid),
+                         "ml": _ml_status(current_app.fortguard_baselines, uid)["status"],
                          "active_ms": _usage_of(bo, uid)["active_ms"]})
         rows.sort(key=lambda r: -r["last_ms"])
         return jsonify({"customers": rows[:200]})
@@ -686,10 +694,12 @@ def register(app, *, bo, api_key, registry, dev_mode):
             "user_id": user_id,
             "display_name": name[0]["display_name"] if name else None,
             "owner_profile": _owner_status(current_app.fortguard_baselines, user_id),
+            "ml_model": _ml_status(current_app.fortguard_baselines, user_id),
             "devices": list(devices.values()),
             "sessions": [{"time_ms": r.get("time_ms"), "session_id": r["session_id"], "event_type": r.get("event_type"),
                           "amount": r.get("amount"), "currency": r.get("currency"), "risk_level": r["risk_level"],
                           "risk_score": r["risk_score"], "action": r.get("action_recommended"),
+                          "reason_codes": r.get("reason_codes") or [],
                           "device_guid": r.get("device_guid")} for r in recs[:100]],
             "latest": recs[0] if recs else None,  # full numbers behind the newest decision
             "usage": _usage_of(bo, user_id),

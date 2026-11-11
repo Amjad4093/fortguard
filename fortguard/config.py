@@ -49,6 +49,9 @@ WEIGHTS = {
     "REASON_DEVICE_INTEGRITY_WEAK": 200,
     # The session's behavior is far from this user's own baseline (only once the baseline is mature).
     "REASON_BEHAVIORAL_ANOMALY_HIGH": 300,
+    # The machine-learning model finds the session unlike this customer's own past sessions
+    # (fortguard/mlmodel.py). On its own it does not reach the step-up band; with the rule above it does.
+    "REASON_ML_BEHAVIOR_ANOMALY": 300,
 }
 
 # Rules that lift the score to at least the STEP_UP band, whatever else is true.
@@ -100,6 +103,15 @@ BASELINE_MIN_FEATURES = 3       # features needed to compute a match at all
 BASELINE_REL_SD_FLOOR = 0.10    # spread never treated as smaller than 10% of the mean
 BASELINE_ANOMALY_BELOW = 0.35   # match score that raises REASON_BEHAVIORAL_ANOMALY_HIGH
 
+# --- Machine-learning anomaly model (fortguard/mlmodel.py) ------------------------------------------
+ML_MIN_SESSIONS = 10            # learned sessions needed before the model has an opinion
+ML_MIN_FEATURES = 4             # features a session needs to be scored
+ML_FEATURE_PRESENT = 0.8        # a feature is used when this share of the customer's sessions has it
+ML_REL_SD_FLOOR = 0.10          # spread never treated as smaller than 10% of the mean
+ML_SHRINK_MIN = 0.2             # covariance shrinkage toward identity: more with few sessions
+ML_SHRINK_MAX = 0.9
+ML_MARGIN = 1.15                # flag only beyond this multiple of the customer's own furthest session
+
 # --- Degraded mode (PRD section 6 fail policy) ---------------------------------------------------
 DEGRADED_STEP_UP_AMOUNT = 100_000   # PKR; at or above this a degraded decision steps up
 
@@ -126,4 +138,4 @@ MAX_CHALLENGES = 100_000
 ALLOWED_APP_IDS = ("com.example.mobilebank",)  # replace with the pilot app's package and bundle IDs
 PLATFORMS = ("Android", "iOS", "Web")  # "Web" is the browser test client only
 
-MODEL_VERSION = "rules-0.3.0+baseline-1"
+MODEL_VERSION = "rules-0.3.0+baseline-1+ml-1"

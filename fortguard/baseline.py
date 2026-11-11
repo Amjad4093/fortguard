@@ -20,7 +20,7 @@ import math
 import statistics
 import threading
 
-from . import config
+from . import config, mlmodel
 
 PROFILE_FEATURES = (
     "ft_swipe_curvature_mean_px",
@@ -92,7 +92,12 @@ class Baselines:
             values = [r[name] for r in rows if name in r]
             if len(values) >= 2:
                 stats[name] = (statistics.fmean(values), statistics.pstdev(values))
-        return {"sessions": len(rows), "stats": stats}
+        return {"sessions": len(rows), "stats": stats, "ml": mlmodel.AnomalyModel.train(rows)}
+
+    def assess_ml(self, user_id, feats):
+        """The machine-learning block for the response (see mlmodel.py)."""
+        prof = self.profile(user_id)
+        return mlmodel.assess(prof["ml"], feats, prof["sessions"])
 
     def assess(self, user_id, feats):
         """Return the baseline block for the response, and whether the anomaly rule fires."""
@@ -122,7 +127,9 @@ class Baselines:
         vec = _vector(feats)
         if len(vec) < config.BASELINE_MIN_FEATURES:
             return False
-        self.bo.x("INSERT OR REPLACE INTO baseline_sessions VALUES (?,?,?,?)", (user_id, session_id, time_ms, json.dumps(vec)))
+        # One row feeds both models: the statistical profile reads its seven features, the ML model reads all.
+        stored = dict(mlmodel.vector(feats), **vec)
+        self.bo.x("INSERT OR REPLACE INTO baseline_sessions VALUES (?,?,?,?)", (user_id, session_id, time_ms, json.dumps(stored)))
         # keep the table small: only the most recent window per user matters
         self.bo.x(
             "DELETE FROM baseline_sessions WHERE user_id=? AND session_id NOT IN "
