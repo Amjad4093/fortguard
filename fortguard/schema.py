@@ -28,6 +28,7 @@ ENV_BOOLS = (
     # (debugger_attached, sim_changed); the rest are recorded and shown, never a reason on their own.
     "debugger_attached", "developer_options", "screen_reader", "unknown_accessibility_service",
     "remote_access_installed", "roaming", "sim_changed", "keyboard_changed",
+    "hotspot",   # the Wi-Fi looks like another phone's hotspot (a metered Wi-Fi network). Recorded only.
 )
 ENV_EXTRA_NUMBERS = {  # name: (low, high, integer?)
     "battery_level": (0, 100, True),
@@ -56,10 +57,12 @@ ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging",
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
 KEY_TYPES = {"DOWN", "UP"}
-UI_TYPES = {"FOCUS", "PASTE", "SUBMIT"}
+UI_TYPES = {"FOCUS", "PASTE", "SUBMIT", "AUTOFILL"}  # AUTOFILL: the system filled the field, nobody typed
 FIELDS = {"username", "password", "otp", "beneficiary_account", "amount", "other"}
 
-TOUCH_KEYS = {"event_type", "x", "y", "pressure", "size", "timestamp_ms"}
+# tdx, tdy: where a touch-down landed inside the control it hit, from -1 (left or top edge) through 0
+# (the centre) to 1. Sent on DOWN only, and only when the SDK found the control.
+TOUCH_KEYS = {"event_type", "x", "y", "pressure", "size", "timestamp_ms", "tdx", "tdy"}
 KEY_KEYS = {"event_type", "ts", "field", "inserted", "deleted"}  # inserted/deleted: character counts only
 UI_KEYS = {"event_type", "field", "ts"}
 SENSOR_KEYS = {"x", "y", "z", "ts"}
@@ -125,10 +128,21 @@ def validate_telemetry(p):
         _need_num(p["seq"], "seq", low=0)
 
     consent = p.get("consent", {})
-    if not isinstance(consent, dict) or set(consent) - {"behavioral"}:
-        _fail("invalid_request", "consent may only contain 'behavioral'")
-    if "behavioral" in consent and not isinstance(consent["behavioral"], bool):
-        _fail("invalid_request", "consent.behavioral must be true or false")
+    if not isinstance(consent, dict) or set(consent) - {"behavioral", "location", "texts"}:
+        _fail("invalid_request", "consent may only contain behavioral, location and texts")
+    for name in ("behavioral", "location"):
+        if name in consent and not isinstance(consent[name], bool):
+            _fail("invalid_request", f"consent.{name} must be true or false")
+    # Which published wording the customer accepted, per group: {"behavioural": {"lang": "en", "version": 2}}.
+    texts = consent.get("texts", {})
+    if not isinstance(texts, dict) or set(texts) - {"behavioural", "location"}:
+        _fail("invalid_request", "consent.texts may only name the behavioural and location groups")
+    for group, accepted in texts.items():
+        if (not isinstance(accepted, dict) or set(accepted) != {"lang", "version"}
+                or not isinstance(accepted["lang"], str) or not re.fullmatch(r"[a-z]{2,3}(-[A-Z]{2})?", accepted["lang"])
+                or isinstance(accepted["version"], bool) or not isinstance(accepted["version"], int)
+                or not 1 <= accepted["version"] <= 100_000):
+            _fail("invalid_request", f"consent.texts.{group} needs a lang code and a whole-number version")
 
     if "user_id" in p:  # optional: the customer id the app uses, so usage can be recorded per customer
         if not isinstance(p["user_id"], str) or not CUSTOMER_ID_RE.fullmatch(p["user_id"]):
@@ -208,6 +222,11 @@ def validate_telemetry(p):
             _need_num(e["pressure"], "touch pressure", 0, 2)
         if "size" in e:
             _need_num(e["size"], "touch size", 0, 1000)
+        if ("tdx" in e) != ("tdy" in e):
+            _fail("invalid_request", "touch tdx and tdy come together")
+        if "tdx" in e:
+            _need_num(e["tdx"], "touch tdx", -1, 1)
+            _need_num(e["tdy"], "touch tdy", -1, 1)
 
     for e in _need_list(p, "key_events", config.MAX_KEYS_PER_BATCH):
         _check_event(e, "key", KEY_KEYS, KEY_TYPES)

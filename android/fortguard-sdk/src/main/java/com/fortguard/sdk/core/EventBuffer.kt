@@ -43,6 +43,12 @@ class EventBuffer(
 
     @Volatile var enabled: Boolean = true
 
+    // Kill switches from the bank's signed configuration. A kind switched off is not collected at all.
+    @Volatile var allowTouch: Boolean = true
+    @Volatile var allowKeys: Boolean = true
+    @Volatile var allowMotion: Boolean = true
+    @Volatile var allowSensors: Boolean = true
+
     private fun bump(name: String) {
         seen[name] = (seen[name] ?: 0L) + 1L
     }
@@ -57,12 +63,22 @@ class EventBuffer(
         }
     }
 
-    fun touch(type: String, x: Double, y: Double, pressure: Double, size: Double, ts: Long) {
+    /**
+     * [tdx], [tdy]: where a touch-down landed inside the control it hit, from -1 (left or top edge)
+     * through 0 (the centre) to 1. Leave them out when the control is not known.
+     */
+    fun touch(type: String, x: Double, y: Double, pressure: Double, size: Double, ts: Long, tdx: Double? = null, tdy: Double? = null) {
         require(type == "DOWN" || type == "MOVE" || type == "UP")
-        add(touch, maxTouch, mapOf(
+        if (!allowTouch) return
+        val event = linkedMapOf<String, Any?>(
             "event_type" to type, "x" to x.coerceIn(-9999.0, 9999.0), "y" to y.coerceIn(-9999.0, 9999.0),
             "pressure" to pressure.coerceIn(0.0, 2.0), "size" to size.coerceIn(0.0, 1000.0), "timestamp_ms" to ts,
-        ), 0, "touch")
+        )
+        if (type == "DOWN" && tdx != null && tdy != null) {
+            event["tdx"] = tdx.coerceIn(-1.0, 1.0)
+            event["tdy"] = tdy.coerceIn(-1.0, 1.0)
+        }
+        add(touch, maxTouch, event, 0, "touch")
     }
 
     /**
@@ -71,6 +87,7 @@ class EventBuffer(
      */
     fun key(type: String, field: Field, ts: Long, inserted: Int = 0, deleted: Int = 0) {
         require(type == "DOWN" || type == "UP")
+        if (!allowKeys) return
         val item = LinkedHashMap<String, Any?>()
         item["event_type"] = type
         item["ts"] = ts
@@ -86,16 +103,21 @@ class EventBuffer(
 
     fun ui(type: String, field: Field, ts: Long) {
         require(type == "FOCUS" || type == "PASTE" || type == "SUBMIT")
+        if (!allowKeys) return
         add(ui, maxUi, mapOf("event_type" to type, "field" to field.wire, "ts" to ts), 2, "ui_events")
     }
 
-    fun accel(x: Double, y: Double, z: Double, ts: Long) = add(accel, maxSensor, sample(x, y, z, ts), 3, "accelerometer")
+    fun accel(x: Double, y: Double, z: Double, ts: Long) {
+        if (allowMotion) add(accel, maxSensor, sample(x, y, z, ts), 3, "accelerometer")
+    }
 
-    fun gyro(x: Double, y: Double, z: Double, ts: Long) = add(gyro, maxSensor, sample(x, y, z, ts), 3, "gyroscope")
+    fun gyro(x: Double, y: Double, z: Double, ts: Long) {
+        if (allowMotion) add(gyro, maxSensor, sample(x, y, z, ts), 3, "gyroscope")
+    }
 
     /** Any other sensor, by its wire name (for example "magnetometer"). Has its own budget, slot 4. */
     fun sensor(name: String, x: Double, y: Double, z: Double, ts: Long) {
-        if (!enabled) return
+        if (!enabled || !allowSensors) return
         synchronized(this) {
             val list = extra.getOrPut(name) { ArrayList() }
             if (totals[4] >= maxExtraSensor) { dropped++; return }

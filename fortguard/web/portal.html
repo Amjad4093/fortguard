@@ -299,6 +299,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     <a href="#/rules" data-page="rules">Rules</a>
     <a href="#/custom" data-page="custom">Bank rules <span class="count hidden" id="nav-pending"></span></a>
     <a href="#/deny" data-page="deny">Lists</a>
+    <a href="#/consent" data-page="consent">Consent wording</a>
+    <a href="#/collection" data-page="collection">Data collection</a>
     <a href="#/users" data-page="users" class="admin-only">Users</a>
     <a href="#/audit" data-page="audit" class="admin-only">Audit log</a>
     <div class="spacer"></div>
@@ -324,7 +326,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data",
     deny_add: "added to a list", deny_remove: "removed from a list", rule_create: "wrote a bank rule", rule_update: "changed a shadow rule",
     rule_request: "asked for a rule change", rule_approve: "approved a rule change", rule_reject: "rejected a rule change",
-    rule_retire: "retired a bank rule", rule_restore: "restored a bank rule" };
+    rule_retire: "retired a bank rule", rule_restore: "restored a bank rule",
+    consent_publish: "published consent wording", config_update: "changed data collection" };
 
   try { S.token = sessionStorage.getItem("fg_token"); } catch (e) { /* ignore */ }
 
@@ -426,7 +429,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var v = $("view"); v.innerHTML = "";
     var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
       customers: parts[1] ? function (x) { return customerDetail(x, decodeURIComponent(parts[1])); } : customers,
-      devices: devices, rules: rules, custom: customRules, deny: denyList, users: users, audit: audit };
+      devices: devices, rules: rules, custom: customRules, deny: denyList, consent: consentPage, collection: collectionPage, users: users, audit: audit };
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
@@ -438,6 +441,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     "Devices": "Phones that have enrolled with FortGuard. Revoke a device to stop it sending data.",
     "Rules": "Points for each signal, and the score bands that decide allow, step-up and block.",
     "Lists": "Deny list: blocked outright. Suspected mules: payee accounts that step up alone and block with another signal. Trusted payees: accounts never treated as a new payee.",
+    "Consent wording": "The words customers see before the app measures how they use it. Publishing new wording raises its version, and each customer's record shows which version they accepted.",
+    "Data collection": "Which kinds of data the app may collect. Each switch is a kill switch: the app obeys it only when the server's signature checks out, and the server drops that kind of data too.",
     "Bank rules": "Your own rules, on top of the built-in ones. A new rule runs in shadow first: it is recorded but changes nothing. Going live needs a second admin.",
     "Users": "Who can sign in to this back office, and what each role may do.",
     "Audit log": "A record of every change and sign-in. Entries cannot be edited."
@@ -662,7 +667,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     ["debugger_attached", "Debugger attached to the app"], ["sim_changed", "SIM changed in the last 72 hours"],
     ["remote_access_installed", "Remote-access app installed"], ["unknown_accessibility_service", "Unrecognised accessibility service on"],
     ["developer_options", "Developer options on"], ["keyboard_changed", "Keyboard app changed since last use"],
-    ["screen_reader", "Screen reader on"], ["roaming", "Roaming"]];
+    ["screen_reader", "Screen reader on"], ["roaming", "Roaming"], ["hotspot", "On another phone's hotspot (best guess)"]];
 
   function formatFeature(v, unit) {
     if (v == null || typeof v !== "number") return null;
@@ -707,8 +712,9 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var grid = el("div", { class: "stat" }, stats.map(function (s) { return el("div", {}, [el("b", { text: String(s[0]) }), el("span", { text: s[1] })]); }));
     var rows = [["Time spent typing", t.active_ms ? (t.active_ms < 1000 ? t.active_ms + " ms" : (t.active_ms / 1000).toFixed(1) + " s") : null]]
       .concat(featureRows(f, [["ft_keystroke_flight_time_avg", "Gap between keys", "ms"], ["ft_keystroke_hold_time_avg", "Key hold time", "ms"],
-        ["ft_hesitation_index", "Hesitation before taps", "%"], ["ft_pasting_frequency", "Pastes into sensitive fields", ""],
-        ["ft_paste_beneficiary_count", "Pastes into the beneficiary field", ""]]));
+        ["ft_hesitation_index", "Long pauses while entering the payment", "%"], ["ft_pasting_frequency", "Pastes into sensitive fields", ""],
+        ["ft_paste_beneficiary_count", "Pastes into the beneficiary field", ""], ["ft_autofill_count", "Fields filled by autofill (best guess)", ""],
+        ["ft_field_time_mean_ms", "Average time in a field", "ms"]]));
     return card("Typing", [grid, kvList(rows) || el("div"), el("p", { class: "hint", text: "Typing speed counts only the time between keys in the same field and ignores pauses over 2 seconds. Corrections are characters deleted. The characters themselves are never stored." })]);
   }
 
@@ -727,7 +733,8 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       el("div", { class: "heat", role: "img", "aria-label": "Touch positions across the screen" }, cells),
       kvList(featureRows(f, [["ft_touch_count", "Touches", ""], ["ft_swipe_count", "Swipes", ""], ["ft_touch_pressure_mean", "Average pressure", ""],
         ["ft_touch_size_mean", "Contact size", ""], ["ft_tap_interval_mean_ms", "Time between taps", "ms"], ["ft_swipe_speed_px_s", "Swipe speed", "px/s"],
-        ["ft_tap_duration_mean_ms", "How long a tap is held", "ms"], ["ft_long_press_count", "Long presses", ""], ["ft_double_tap_count", "Double taps", ""]])) || el("div")]);
+        ["ft_tap_duration_mean_ms", "How long a tap is held", "ms"], ["ft_long_press_count", "Long presses", ""], ["ft_double_tap_count", "Double taps", ""],
+        ["ft_tap_offset_mean", "Distance of taps from the centre of the button (0 centre, 1 edge)", ""]])) || el("div")]);
   }
 
   function deviceCard(d) {
@@ -759,6 +766,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var motion = featureRows(f, [["ft_accel_samples", "Motion samples", ""], ["ft_tremor_band_ratio", "Hand tremor", "%"], ["ft_device_angle_stability", "Device stability", ""],
       ["ft_tilt_pitch_deg", "Tilt, front to back", "°"], ["ft_tilt_roll_deg", "Tilt, side to side", "°"]]);
     if (f.ft_lying_flat != null) motion.push(["Lying still on a flat surface", f.ft_lying_flat ? "Yes" : "No"]);
+    if (f.ft_walking != null) motion.push(["Walking", f.ft_walking ? "Yes, about " + (Math.round(f.ft_step_cadence_hz * 10) / 10) + " steps a second" : "No"]);
     var kids = [kvList(rows) || el("div", { class: "empty", text: "No device facts were sent." })];
     if (kvList(motion)) kids.push(el("div", { class: "sub", text: "Motion" }), kvList(motion));
     return card("Device and environment", kids);
@@ -868,6 +876,16 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       op.status === "MATURE" ? el("p", { class: "hint", text: "Built from " + op.sessions + " allowed sessions. Each new session is compared with it." })
         : el("p", { class: "hint", text: op.sessions + " of " + op.required + " sessions learned. The profile starts counting toward decisions once complete." }),
       feats.length ? kvList(feats) : el("div", { class: "empty", text: "No profile features yet." })]));
+
+    var GROUP_TEXT = { behavioural: "Behaviour (typing, touch, motion)", location: "Approximate location" };
+    var conRows = (c.consents || []).map(function (h) {
+      return el("tr", {}, [el("td", { text: when(h.time_ms) }), el("td", { text: GROUP_TEXT[h.group] || h.group }),
+        el("td", {}, [pill(h.granted ? "ALLOW" : "GREY", h.granted ? "Agreed" : "Switched off")]),
+        el("td", { text: h.version ? "version " + h.version + " (" + h.lang + ")" : "not reported" }), el("td", { class: "mono", text: short(h.device_guid, 18) })]);
+    });
+    v.appendChild(el("section", { class: "card scroll" }, [el("h2", { text: "Consent" }), el("table", {}, [el("thead", {}, [el("tr", {},
+      ["When", "For", "Answer", "Wording accepted", "Device"].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, conRows)]),
+      conRows.length ? null : el("div", { class: "empty", text: "No consent answers recorded yet. Newer apps report them with each session." })]));
 
     var devRows = c.devices.map(function (d) {
       return el("tr", {}, [el("td", { class: "mono", text: short(d.device_guid, 18) }), el("td", { text: d.model || "–" }),
@@ -1217,6 +1235,62 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       return el("tr", {}, [el("td", { text: u.username }), el("td", {}, [sel]), el("td", {}, [pill(u.active ? "ACTIVE" : "inactive", u.active ? "active" : "inactive")]), el("td", { text: when(u.created_ms) }), el("td", {}, [reset, " ", toggle])]);
     });
     v.appendChild(el("section", { class: "card scroll", style: "margin-top:14px" }, [el("table", {}, [el("thead", {}, [el("tr", {}, ["User", "Role", "Status", "Created", ""].map(function (h) { return el("th", { text: h }); }))]), el("tbody", {}, rows)])]));
+  }
+
+  // --- consent wording ---------------------------------------------------------------------------------------------
+  async function consentPage(v) {
+    head(v, "Consent wording");
+    var data = await call("GET", "/v1/bo/consent");
+    var GROUP_TEXT = { behavioural: "Behaviour (typing, touch, motion)", location: "Approximate location" };
+    if (can("admin")) {
+      var group = el("select", { "aria-label": "Consent for" }, data.groups.map(function (g) { return el("option", { value: g, text: GROUP_TEXT[g] || g }); }));
+      var lang = el("input", { value: "en", "aria-label": "Language code", style: "width:90px", autocomplete: "off" });
+      var text = el("textarea", { "aria-label": "Wording", placeholder: "The words the customer reads before agreeing" });
+      function fill() { var t = data.texts.filter(function (x) { return x.group === group.value && x.lang === lang.value; })[0]; text.value = t ? t.current.text : ""; }
+      group.addEventListener("change", fill); lang.addEventListener("change", fill); fill();
+      v.appendChild(card("Publish wording", [el("div", { class: "toolbar" }, [group, el("label", { text: "Language " }), lang]), text,
+        el("p", { class: "msg", text: "Use a language code such as en or ur. Publishing changes what new customers see at once. Customers who agreed to earlier wording keep their record of that version." }),
+        el("div", { class: "toolbar" }, [el("button", { class: "primary", type: "button", text: "Publish as a new version", onclick: async function () {
+          try { var out = await call("POST", "/v1/bo/consent", { group: group.value, lang: lang.value, text: text.value }); say("Published version " + out.published.version + "."); route(); } catch (e) { say(e.message, true); }
+        } })])]));
+    }
+    data.texts.forEach(function (t) {
+      var kids = [el("p", { style: "white-space:pre-wrap", text: t.current.text }),
+        el("p", { class: "msg", text: "Version " + t.current.version + ", published by " + t.current.published_by + " on " + when(t.current.published_ms) })];
+      if (t.earlier.length) kids.push(el("details", {}, [el("summary", { text: "Earlier versions (" + t.earlier.length + ")" })].concat(t.earlier.map(function (e) {
+        return el("div", { style: "margin-top:10px" }, [el("small", { text: "Version " + e.version + ", " + when(e.published_ms) + ", " + e.published_by }), el("p", { style: "white-space:pre-wrap", text: e.text })]);
+      }))));
+      v.appendChild(el("section", { class: "card", style: "margin-top:14px" }, [el("h2", { text: (GROUP_TEXT[t.group] || t.group) + " · " + t.lang }), el("div", { class: "body" }, kids)]));
+    });
+  }
+
+  // --- what the SDK may collect ------------------------------------------------------------------------------------
+  async function collectionPage(v) {
+    head(v, "Data collection");
+    var data = await call("GET", "/v1/bo/config");
+    var admin = can("admin");
+    var boxes = {};
+    var rows = data.kinds.map(function (k) {
+      var c = el("input", { type: "checkbox", id: "ck-" + k.name }); c.checked = !!data.config.collect[k.name]; c.disabled = !admin; boxes[k.name] = c;
+      return el("div", { class: "rulerow" }, [el("label", { for: "ck-" + k.name }, [k.about, el("small", { text: k.name })]), c]);
+    });
+    var every = el("input", { type: "number", min: "1", max: "60", step: "1", value: String(Math.round(data.config.flush_interval_ms / 1000)), "aria-label": "Seconds between uploads", style: "width:100px" });
+    every.disabled = !admin;
+    var save = admin ? el("button", { class: "primary", type: "button", text: "Sign and publish", onclick: async function () {
+      var collect = {}; Object.keys(boxes).forEach(function (k) { collect[k] = boxes[k].checked; });
+      var off = Object.keys(collect).filter(function (k) { return !collect[k]; });
+      if (off.length && !confirm("Switch off " + off.join(", ") + " for every app? Decisions will have less to go on.")) return;
+      try { await call("PUT", "/v1/bo/config", { collect: collect, flush_interval_ms: parseInt(every.value, 10) * 1000 }); say("Published. Apps pick it up with their next upload."); route(); } catch (e) { say(e.message, true); }
+    } }) : null;
+    v.appendChild(el("div", { class: "two" }, [
+      card("What the app may collect", rows.concat([el("div", { class: "rulerow" }, [el("div", {}, ["Seconds between uploads", el("small", { text: "flush_interval_ms" })]), every]),
+        el("div", { class: "toolbar", style: "margin-top:12px" }, [save])])),
+      card("Signature", [kvList([["Configuration version", String(data.config.version)], ["Issued", when(data.config.issued_ms)], ["Algorithm", data.key.algorithm],
+        ["Key fingerprint (SHA-256)", data.key.key_sha256]]),
+        el("p", { class: "msg", text: "Build this public key into the app so it can check the signature. An app without a built-in key trusts the first key it sees." }),
+        el("code", { style: "display:block;word-break:break-all;white-space:normal", text: data.key.public_key }),
+        el("p", { class: "msg", text: "The signing key is stored in this server's database. For a bank rollout, hold it in a key-management service or HSM." })])
+    ]));
   }
 
   // --- deny list ---------------------------------------------------------------------------------------------------

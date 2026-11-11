@@ -24,15 +24,31 @@ class ApiClient(baseUrl: String, private val timeoutMs: Int = 10_000) {
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             conn.outputStream.use { it.write(bodyText.toByteArray(Charsets.UTF_8)) }
-            val status = conn.responseCode
-            val stream = if (status >= 400) conn.errorStream else conn.inputStream
-            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-            @Suppress("UNCHECKED_CAST")
-            val parsed = runCatching { MiniJson.parse(text) as? Map<String, Any?> }.getOrNull()
-            return Response(status, parsed ?: emptyMap())
+            return read(conn)
         } finally {
             conn.disconnect()
         }
+    }
+
+    fun get(path: String): Response {
+        val conn = URI(base + path).toURL().openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "GET"
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            return read(conn)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun read(conn: HttpURLConnection): Response {
+        val status = conn.responseCode
+        val stream = if (status >= 400) conn.errorStream else conn.inputStream
+        val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+        @Suppress("UNCHECKED_CAST")
+        val parsed = runCatching { MiniJson.parse(text) as? Map<String, Any?> }.getOrNull()
+        return Response(status, parsed ?: emptyMap())
     }
 
     fun postJson(path: String, body: Map<String, Any?>, headers: Map<String, String> = emptyMap()) =

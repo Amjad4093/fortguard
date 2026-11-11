@@ -200,6 +200,62 @@ def tremor_band_ratio(accel):
     return float(band / total)
 
 
+def step_cadence(accel):
+    """(steps a second, walking 1.0 or 0.0) from a window of raw accelerometer samples.
+
+    Walking shows as a steady rhythm in the size of the acceleration at step frequency. Returns
+    (None, None) when the window is too short to tell, and (None, 0.0) when the customer is not walking.
+    """
+    if len(accel) < 32:
+        return None, None
+    ordered = sorted(accel, key=lambda s: s["ts"])
+    span_s = (ordered[-1]["ts"] - ordered[0]["ts"]) / 1000.0
+    if span_s < config.WALK_MIN_SPAN_S:
+        return None, None
+    fs = (len(ordered) - 1) / span_s
+    low, high = config.WALK_BAND_HZ
+    if fs / 2 <= high:
+        return None, None
+    mag = np.array([math.sqrt(s["x"] ** 2 + s["y"] ** 2 + s["z"] ** 2) for s in ordered])
+    mag = mag - mag.mean()
+    if float(mag.std()) < config.WALK_MIN_STD:
+        return None, 0.0
+    power = np.abs(np.fft.rfft(mag)) ** 2
+    freqs = np.fft.rfftfreq(len(mag), d=1.0 / fs)
+    total = power[1:].sum()
+    in_band = (freqs >= low) & (freqs <= high)
+    if total <= 0 or not in_band.any() or power[in_band].sum() / total < config.WALK_MIN_SHARE:
+        return None, 0.0
+    return float(freqs[in_band][int(np.argmax(power[in_band]))]), 1.0
+
+
+def tap_offsets(touch):
+    """How far each touch-down landed from the centre of the control it hit: 0 is dead centre, about 1 an edge."""
+    return [math.hypot(e["tdx"], e["tdy"]) for e in touch if e["event_type"] == "DOWN" and "tdx" in e]
+
+
+def field_marks(ui):
+    """(time, field or None) for the events that start or end a stay in a field: focus, and submit (None)."""
+    return [(e["ts"], None if e["event_type"] == "SUBMIT" else e.get("field", "other"))
+            for e in ui if e["event_type"] in ("FOCUS", "SUBMIT")]
+
+
+def field_times(marks):
+    """Milliseconds spent in each field, from marks sorted by time: {field: total}, and every single stay.
+
+    A stay runs from a focus to the next focus or submit, and counts for at most FIELD_TIME_CAP_MS. The
+    last focus of a session has no end and is left out.
+    """
+    totals, stays = {}, []
+    for (start, field), (end, _) in zip(marks, marks[1:]):
+        if field is None:
+            continue
+        stay = min(max(0, end - start), config.FIELD_TIME_CAP_MS)
+        totals[field] = totals.get(field, 0) + stay
+        stays.append(stay)
+    return totals, stays
+
+
 def hesitation_marks(keys, ui):
     """(time, is_submit) for every event that matters to hesitation, unsorted.
 
@@ -278,6 +334,9 @@ def compute_features_full(session):
     accel = session.accel
     means = [statistics.fmean(s[axis] for s in accel) for axis in ("x", "y", "z")] if accel else [0.0, 0.0, 0.0]
     pitch, roll, flat = tilt(*means, len(accel), _variance_sum(accel))
+    cadence, walking = step_cadence(recent_accel(accel))
+    offsets = tap_offsets(touch)
+    stays = field_times(sorted(field_marks(ui), key=lambda m: m[0]))[1]
     return {
         "ft_touch_count": sum(1 for e in touch if e["event_type"] == "DOWN"),
         "ft_swipe_count": len(deviations),
@@ -310,4 +369,9 @@ def compute_features_full(session):
         "ft_tilt_pitch_deg": pitch,
         "ft_tilt_roll_deg": roll,
         "ft_lying_flat": flat,
+        "ft_step_cadence_hz": cadence,
+        "ft_walking": walking,
+        "ft_tap_offset_mean": statistics.fmean(offsets) if offsets else None,
+        "ft_autofill_count": sum(1 for e in ui if e["event_type"] == "AUTOFILL"),
+        "ft_field_time_mean_ms": statistics.fmean(stays) if stays else None,
     }

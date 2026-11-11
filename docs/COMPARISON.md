@@ -81,19 +81,34 @@ the Android collector code say so", not "seen working".
 
 All weights and thresholds for these are judgement calls, not measured on real customers.
 
-## Not added yet, and why
+## Added in the second pass (2026-11-12)
 
-| From the platform project | Why it is not here yet |
+Everything in the first "not added yet" list that can run on this server was then built:
+
+| From the platform project | What was built here |
 | --- | --- |
-| Velocity features: payments and new payees in 24 hours, distinct payees in 7 days, customers per device | The most useful missing piece. Needs a transaction history table and counters. A day or two of work here. |
-| Rule expression language, shadow rules, backtest, maker-checker approval | This project has fixed rules with editable points. A rule language is a larger change and should be designed once, by both teams. |
-| Mule-account and allow lists | The deny list here is one list of four kinds. Mule and allow lists are a small extension. |
-| Journeys (payment, add payee, sign-up, device enrolment) with different actions per journey | This project scores LOGIN and payment events only. |
-| Step-up verification matrix and passkeys (FortAuth) | Depends on the bank's authentication stack. |
-| Consent wording per feature group and language, with versions | This project has one behavioural consent switch and one location switch. |
-| Signed remote configuration with per-signal kill switches | Not needed for the demo. Needed before a bank rollout. |
-| Tap offset from button centre, walking cadence, hotspot, autofill, time in field | Each needs new on-device code and a phone to test on. |
+| Velocity features | A history row per decided request and six counters: payments and amount in 24 hours, new payees in 24 hours, different payees in 7 days, customers on one phone, and customers who added the same new payee. Four reasons use them. |
+| Mule and allow lists | The deny list gained a suspected-mule list (step-up alone, block with another signal) and a trusted-payee list (never treated as a new payee). |
+| Journeys | PROFILE_CHANGE, SIGN_UP and DEVICE_ENROLLMENT beside LOGIN, ADD_PAYEE and FUNDS_TRANSFER, with bands that can be set for one journey. |
+| Rule language, shadow rules, backtest, approval | The bank writes its own rules in a small expression language (parsed, never eval'd). A rule starts in shadow, can be tried on stored decisions, and needs a second admin to go live. |
+| Consent wording per group and language | Versioned texts published from the back office, served to apps, and a record of which version each customer accepted. |
+| Signed remote configuration with kill switches | The server signs which kinds of data the SDK may collect (ES256). The Android SDK checks the signature before obeying, and the server drops any kind that is switched off. |
+| Tap offset from the centre of the button | The Android SDK finds the control under a touch-down and sends only the position inside it. |
+| Walking cadence | Computed on the server from the raw accelerometer window. |
+| Time in a field | Computed on the server from focus and submit events. |
+| Autofill | Best guess on Android: text that arrives while the field does not have the cursor. |
+| Hotspot | Best guess on Android: the Wi-Fi is a metered network. |
+
+None of the new Android capture has been run on a phone. Thresholds and weights are judgement calls.
+
+## Still not here, and why
+
+| From the platform project | Why |
+| --- | --- |
+| Passkeys and the step-up verification matrix (FortAuth) | They are the bank's login system, not a fraud signal. This project asks for a device fingerprint or face check on step-up and leaves the rest to the bank. |
 | Kafka, Redis, ClickHouse, multi-tenant services, Helm | A different architecture. It cannot run on PythonAnywhere and is not a feature to copy. |
+| The new capture on iOS | The iOS SDK has not been touched in this pass. It sends none of the facts added on 2026-11-11 or 2026-11-12. |
+| Left-hand probability, correction taps, app tampered, reinstall count | In the platform contract but not computed there either. |
 
 ## What this project has that I did not find there
 

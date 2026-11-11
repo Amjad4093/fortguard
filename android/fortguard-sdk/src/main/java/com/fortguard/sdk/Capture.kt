@@ -10,6 +10,8 @@ import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import android.view.Window
 import android.widget.EditText
 import com.fortguard.sdk.core.EventBuffer
@@ -23,8 +25,11 @@ private fun wallFromUptime(uptimeMs: Long): Long =
 internal class TouchCallback(
     val base: Window.Callback,
     private val buffer: EventBuffer,
+    /** The window's top view, used to find which control a touch landed on. */
+    private val root: () -> View? = { null },
 ) : Window.Callback by base {
     private var lastMove = 0L
+    private val corner = IntArray(2)
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         runCatching { record(event) }
@@ -46,7 +51,34 @@ internal class TouchCallback(
         val i = if (type == "MOVE") 0 else ev.actionIndex
         val x = if (Build.VERSION.SDK_INT >= 29) ev.getRawX(i) else ev.rawX
         val y = if (Build.VERSION.SDK_INT >= 29) ev.getRawY(i) else ev.rawY
-        buffer.touch(type, x.toDouble(), y.toDouble(), ev.getPressure(i).toDouble(), ev.getTouchMajor(i).toDouble(), ts)
+        val offset = if (ev.actionMasked == MotionEvent.ACTION_DOWN) runCatching { offsetInControl(x, y) }.getOrNull() else null
+        buffer.touch(type, x.toDouble(), y.toDouble(), ev.getPressure(i).toDouble(), ev.getTouchMajor(i).toDouble(), ts,
+            offset?.first, offset?.second)
+    }
+
+    /**
+     * Where the finger landed inside the button or input it hit: (0, 0) is the centre, 1 an edge.
+     * Only the position inside the control is kept, never which control it was or what it shows.
+     */
+    private fun offsetInControl(rawX: Float, rawY: Float): Pair<Double, Double>? {
+        val top = root() ?: return null
+        val hit = controlAt(top, rawX, rawY) ?: return null
+        if (hit.width <= 0 || hit.height <= 0) return null
+        hit.getLocationOnScreen(corner)
+        val dx = (rawX - corner[0] - hit.width / 2f) / (hit.width / 2f)
+        val dy = (rawY - corner[1] - hit.height / 2f) / (hit.height / 2f)
+        return dx.toDouble().coerceIn(-1.0, 1.0) to dy.toDouble().coerceIn(-1.0, 1.0)
+    }
+
+    /** The innermost visible button or input under the point, or null when the touch hit none. */
+    private fun controlAt(view: View, rawX: Float, rawY: Float): View? {
+        if (view.visibility != View.VISIBLE) return null
+        view.getLocationOnScreen(corner)
+        if (rawX < corner[0] || rawX > corner[0] + view.width || rawY < corner[1] || rawY > corner[1] + view.height) return null
+        if (view is ViewGroup) {
+            for (i in view.childCount - 1 downTo 0) controlAt(view.getChildAt(i), rawX, rawY)?.let { return it }
+        }
+        return if (view.isClickable || view is EditText) view else null
     }
 }
 
@@ -55,14 +87,22 @@ internal class TouchCallback(
  *
  * Soft keyboards do not report key press and release, only that the text changed, so each edit is
  * sent as one DOWN event. The text itself is never read: only that an edit happened, when, and in
- * which field. Many characters arriving in one edit is reported as a paste.
+ * which field. Many characters arriving in one edit is reported as a paste. Text that arrives while
+ * the field does not have the cursor is reported as autofill: a best guess, since Android does not
+ * tell an app when its autofill service filled a field. An app that sets the text itself after
+ * calling watch() will be counted the same way.
  */
-internal class FieldWatcher(private val buffer: EventBuffer, private val field: Field) : TextWatcher {
+internal class FieldWatcher(
+    private val buffer: EventBuffer,
+    private val field: Field,
+    private val hasFocus: () -> Boolean = { true },
+) : TextWatcher {
     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
 
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
         val now = System.currentTimeMillis()
         when {
+            count - before >= AUTOFILL_MIN_CHARS && !hasFocus() -> buffer.ui("AUTOFILL", field, now)
             // A paste is not typing, so it adds no character counts.
             count >= PASTE_MIN_CHARS && count - before >= PASTE_MIN_CHARS -> buffer.ui("PASTE", field, now)
             // Only the number of characters added and removed is sent, never which characters.
@@ -76,11 +116,12 @@ internal class FieldWatcher(private val buffer: EventBuffer, private val field: 
         /** Keyboards insert word suggestions too, so a paste is judged by size. Use number or
          *  no-suggestion inputs for account and amount fields, as the demo does. */
         const val PASTE_MIN_CHARS = 6
+        const val AUTOFILL_MIN_CHARS = 2
     }
 }
 
 internal fun watchField(editText: EditText, field: Field, buffer: EventBuffer) {
-    editText.addTextChangedListener(FieldWatcher(buffer, field))
+    editText.addTextChangedListener(FieldWatcher(buffer, field) { editText.hasFocus() })
     val previous = editText.onFocusChangeListener
     editText.setOnFocusChangeListener { v, hasFocus ->
         if (hasFocus) buffer.ui("FOCUS", field, System.currentTimeMillis())

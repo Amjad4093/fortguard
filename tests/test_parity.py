@@ -224,3 +224,35 @@ def test_the_deny_list_blocks_even_when_scoring_falls_back(api, admin):
         "session_id": "sess_never_seen_1", "user_id": "usr_denied01", "event_type": "LOGIN", "allow_degraded": True}, auth=True)
     assert status == 200, body
     assert body["risk_level"] == "BLOCK" and body["reason_codes"][0] == "REASON_ON_DENY_LIST", body
+
+
+# --- Tap offset, autofill and hotspot through the API --------------------------------------------------
+
+def test_tap_offset_autofill_and_hotspot_are_accepted_and_shown(api, admin, make_session):
+    s = make_session("genuine", 21)
+    def signed(i, batch):
+        payload = copy.deepcopy({k: v for k, v in batch.items() if k != "signature"})
+        payload["environment"]["hotspot"] = True
+        for e in payload.get("touch_events", []):
+            if e["event_type"] == "DOWN":
+                e["tdx"], e["tdy"] = 0.6, 0.8
+        if i == 0:
+            payload.setdefault("ui_events", []).append({"event_type": "AUTOFILL", "field": "other", "ts": payload["timestamp_ms"]})
+        return s["device"].sign(payload)
+    s["batches"] = [signed(i, b) for i, b in enumerate(s["batches"])]
+    status, body = run_session(api, s)
+    assert status == 200 and body["risk_level"] == "ALLOW", body
+    shown = admin.call("get", "/v1/bo/decisions")[1]["decisions"][0]
+    assert shown["environment"]["hotspot"] is True
+    assert shown["features"]["ft_tap_offset_mean"] == pytest.approx(1.0)
+    assert shown["features"]["ft_autofill_count"] == 1
+
+
+def test_half_a_tap_offset_is_refused(api, make_session):
+    s = make_session("genuine", 22)
+    payload = copy.deepcopy({k: v for k, v in s["batches"][0].items() if k != "signature"})
+    down = next(e for e in payload["touch_events"] if e["event_type"] == "DOWN")
+    down["tdx"] = 0.2
+    s["batches"][0] = s["device"].sign(payload)
+    with pytest.raises(RuntimeError, match="telemetry rejected: 400"):
+        run_session(api, s)

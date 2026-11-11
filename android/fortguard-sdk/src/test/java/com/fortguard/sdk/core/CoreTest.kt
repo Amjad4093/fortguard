@@ -107,6 +107,89 @@ class CoreTest {
         assertEquals(payload.keys - "owner_proof", seenByProof)
     }
 
+    // --- Signed configuration and consent ---------------------------------------------------------------
+
+    private fun config(version: Long = 3, touch: Boolean = true): Map<String, Any?> = mapOf(
+        "version" to version, "issued_ms" to 1_800_000_000_000L, "flush_interval_ms" to 8000L,
+        "collect" to mapOf("touch" to touch, "keys" to true, "motion" to true, "sensors" to false, "location" to true),
+    )
+
+    private fun signConfig(config: Map<String, Any?>, key: java.security.PrivateKey, context: ByteArray = ConfigSigning.signingBytes(config)): String =
+        b64url(Signature.getInstance("SHA256withECDSA").run { initSign(key); update(context); sign() })
+
+    @Test fun configurationSignatureIsCheckedAgainstTheGivenKey() {
+        val kp = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val other = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val signature = signConfig(config(), kp.private)
+        assertTrue(ConfigSigning.verify(config(), signature, kp.public.encoded))
+        assertFalse("a changed switch must not verify", ConfigSigning.verify(config(touch = false), signature, kp.public.encoded))
+        assertFalse("another key must not verify", ConfigSigning.verify(config(), signature, other.public.encoded))
+        assertFalse(ConfigSigning.verify(config(), "not-a-signature", kp.public.encoded))
+        // A telemetry signature over the same document is not a configuration signature.
+        val asTelemetry = signConfig(config(), kp.private, TelemetrySigning.signingBytes(config()))
+        assertFalse(ConfigSigning.verify(config(), asTelemetry, kp.public.encoded))
+    }
+
+    @Test fun policyIsReadWholeOrNotAtAll() {
+        val p = CollectionPolicy.from(config())!!
+        assertEquals(CollectionPolicy(version = 3, touch = true, keys = true, motion = true, sensors = false, location = true, flushIntervalMs = 8000), p)
+        assertEquals(null, CollectionPolicy.from(config() - "version"))
+        assertEquals(null, CollectionPolicy.from(config() + ("collect" to mapOf("touch" to true))))
+        assertEquals(null, CollectionPolicy.from(config() + ("collect" to mapOf("touch" to "yes", "keys" to true, "motion" to true, "sensors" to true, "location" to true))))
+        assertEquals(60_000L, CollectionPolicy.from(config() + ("flush_interval_ms" to 9_999_999L))!!.flushIntervalMs)
+    }
+
+    private class Memory : ConfigMemory {
+        val values = HashMap<String, String>()
+        override fun get(name: String) = values[name]
+        override fun put(name: String, value: String) { values[name] = value }
+    }
+
+    private fun engineWith(configKey: ByteArray?, memory: ConfigMemory?): FortGuardEngine {
+        val (key, _) = softwareKey()
+        return FortGuardEngine(ApiClient("http://127.0.0.1:9"), "com.example.mobilebank", "dev_abcdefgh1234", key,
+            AttestationProvider { "unused" }, { emptyMap() }, configKey = configKey, configMemory = memory)
+    }
+
+    @Test fun aSavedConfigurationIsAppliedAtStartOnlyIfItStillVerifies() {
+        val kp = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val saved = CanonicalJson.encode(mapOf("config" to config(), "signature" to signConfig(config(), kp.private)))
+        val good = engineWith(kp.public.encoded, Memory().apply { put("config_signed", saved) })
+        assertEquals(3L, good.policy.version)
+        assertFalse(good.policy.sensors)
+        assertFalse("the buffer obeys the switch", good.buffer.allowSensors)
+        // Someone edits the saved file to switch touch off: the signature no longer matches, so it is ignored.
+        val edited = saved.replace("\"touch\":true", "\"touch\":false")
+        val tampered = engineWith(kp.public.encoded, Memory().apply { put("config_signed", edited) })
+        assertEquals(CollectionPolicy(), tampered.policy)
+        assertTrue(tampered.buffer.allowTouch)
+    }
+
+    @Test fun consentBlockCarriesAnswersAndAcceptedWording() {
+        val e = engineWith(null, null)
+        assertEquals(mapOf("behavioral" to true), e.consentBlock())
+        e.consentLocation = false
+        e.consentTexts = mapOf("behavioural" to ("en" to 2L))
+        assertEquals(mapOf("behavioral" to true, "location" to false,
+            "texts" to mapOf("behavioural" to mapOf("lang" to "en", "version" to 2L))), e.consentBlock())
+    }
+
+    @Test fun aKindSwitchedOffIsNotCollected() {
+        val b = EventBuffer()
+        b.allowTouch = false; b.allowSensors = false
+        b.touch("DOWN", 1.0, 2.0, 0.5, 10.0, 1000)
+        b.sensor("light", 300.0, 0.0, 0.0, 1000)
+        b.key("DOWN", Field.AMOUNT, 1000, inserted = 1)
+        b.accel(0.0, 9.8, 0.0, 1000)
+        val d = b.drain()
+        assertTrue(d.touch.isEmpty() && d.extra.isEmpty())
+        assertEquals(1, d.keys.size); assertEquals(1, d.accel.size)
+        b.allowKeys = false; b.allowMotion = false
+        b.key("DOWN", Field.AMOUNT, 1001, inserted = 1); b.ui("PASTE", Field.AMOUNT, 1001); b.accel(0.0, 9.8, 0.0, 1001); b.gyro(0.0, 0.0, 0.0, 1001)
+        assertTrue(b.drain().isEmpty)
+        assertEquals("typed characters are not counted while typing is off", 1L, b.typing().first)
+    }
+
     // --- Event buffer --------------------------------------------------------------------------------------
 
     @Test fun keyEventsCarryOnlyTypeTimeAndField() {

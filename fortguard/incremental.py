@@ -17,7 +17,7 @@ from collections import deque
 import numpy as np
 
 from . import config
-from .features import hesitation_from_marks, hesitation_marks, tilt
+from .features import field_marks, field_times, hesitation_from_marks, hesitation_marks, step_cadence, tilt
 
 SENSITIVE_PASTE_FIELDS = {"beneficiary_account", "amount", "otp"}
 
@@ -106,6 +106,9 @@ class FeatureState:
         self.last_tap_down = None
         self.gesture_ts = None         # timestamps of the gesture in progress
         self.swipe_speed = Running()
+        self.tap_offset = Running()    # distance of each touch-down from the centre of its control
+        self.autofill = 0
+        self.field_marks = []          # (time, field) for focus and submit, kept sorted by time
 
     # --- updates ---------------------------------------------------------------------------
 
@@ -126,6 +129,10 @@ class FeatureState:
             if e["event_type"] == "PASTE":
                 self.paste_sensitive += e.get("field") in SENSITIVE_PASTE_FIELDS
                 self.paste_beneficiary += e.get("field") == "beneficiary_account"
+            elif e["event_type"] == "AUTOFILL":
+                self.autofill += 1
+        for mark in field_marks(ui):
+            bisect.insort(self.field_marks, mark, key=lambda m: m[0])
         for mark in hesitation_marks(keys, ui):
             bisect.insort(self.hesitation_marks, mark)
         # Sensor batches are summarised with numpy and merged: exact, and far cheaper than per sample.
@@ -158,6 +165,8 @@ class FeatureState:
                 self.pressure.add(e["pressure"])
             if "size" in e:
                 self.touch_size.add(e["size"])
+            if kind == "DOWN" and "tdx" in e:
+                self.tap_offset.add(math.hypot(e["tdx"], e["tdy"]))
             if kind == "DOWN":
                 self.touch_downs += 1
                 self.gesture = [(e["x"], e["y"])]
@@ -229,6 +238,8 @@ class FeatureState:
         s, f, h = self.swipes, self.flights, self.holds
         ax = self.accel_axes
         pitch, roll, flat = tilt(ax[0].mean, ax[1].mean, ax[2].mean, ax[0].n, var_sum(ax))
+        cadence, walking = step_cadence(list(self.accel_recent))
+        stays = field_times(self.field_marks)[1]
         return {
             "ft_touch_count": self.touch_downs,
             "ft_swipe_count": s.n,
@@ -263,4 +274,9 @@ class FeatureState:
             "ft_tilt_pitch_deg": pitch,
             "ft_tilt_roll_deg": roll,
             "ft_lying_flat": flat,
+            "ft_step_cadence_hz": cadence,
+            "ft_walking": walking,
+            "ft_tap_offset_mean": self.tap_offset.mean if self.tap_offset.n else None,
+            "ft_autofill_count": self.autofill,
+            "ft_field_time_mean_ms": sum(stays) / len(stays) if stays else None,
         }

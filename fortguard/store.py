@@ -17,7 +17,7 @@ LATEST_FLAGS = ("active_call", "cellular_call", "screen_sharing")
 # measure one shows "not reported" in the back office, never a false "no".
 STICKY_FACTS = ("debugger_attached", "sim_changed", "keyboard_changed", "remote_access_installed",
                 "developer_options", "unknown_accessibility_service")
-LATEST_FACTS = ("roaming", "screen_reader")
+LATEST_FACTS = ("roaming", "screen_reader", "hotspot")
 
 
 class ReplayDetected(Exception):

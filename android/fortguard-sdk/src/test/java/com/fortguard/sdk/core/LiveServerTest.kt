@@ -62,4 +62,34 @@ class LiveServerTest {
         assertEquals("bad_signature", api.post("/v1/telemetry/stream", sent.replace("\"active_call\":true", "\"active_call\":false")).errorCode)
         assertEquals("replay_detected", api.post("/v1/telemetry/stream", sent).errorCode)
     }
+
+    private class Memory : ConfigMemory {
+        val values = HashMap<String, String>()
+        override fun get(name: String) = values[name]
+        override fun put(name: String, value: String) { values[name] = value }
+    }
+
+    /** The server signs in Python, the SDK verifies with the JVM: the two must agree on every byte. */
+    @Test fun signedConfigurationFromTheRealServerVerifies() {
+        assumeTrue("set FORTGUARD_TEST_SERVER to run", server != null)
+        val kp = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val api = ApiClient(server!!)
+        val memory = Memory()
+        val trusting = FortGuardEngine(api, "com.example.mobilebank", Ids.random("dev_", 12), JcaDeviceKey(kp.private, kp.public),
+            DevAttestationProvider(api), { environment().toMap() }, configMemory = memory)
+        val first = trusting.refreshConfig()
+        assertTrue(first.message, first.ok)
+        assertTrue(trusting.policy.version >= 1)
+        assertTrue("the first key seen is remembered", memory.values.containsKey("config_key"))
+        // An app built with a different key refuses the same configuration and keeps collecting everything.
+        val pinnedWrong = FortGuardEngine(api, "com.example.mobilebank", Ids.random("dev_", 12), JcaDeviceKey(kp.private, kp.public),
+            DevAttestationProvider(api), { environment().toMap() }, configKey = kp.public.encoded)
+        val refused = pinnedWrong.refreshConfig()
+        assertTrue(refused.message, !refused.ok && refused.message.contains("signature does not verify"))
+        assertEquals(CollectionPolicy(), pinnedWrong.policy)
+        // A batch is accepted and tells the SDK which configuration version the server is on.
+        val f = trusting.flush(force = true)
+        assertTrue(f.message, f.ok)
+        assertEquals(trusting.policy.version, f.response!!.body["config_version"])
+    }
 }

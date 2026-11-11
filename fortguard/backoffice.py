@@ -193,6 +193,8 @@ class BackOffice:
         from .velocity import Velocity
         self.velocity = Velocity(self)
         self.custom = customrules.CustomRules(self)
+        from .remote import Remote
+        self.remote = Remote(self)
 
     def now_ms(self):
         return int(self.clock() * 1000)
@@ -349,6 +351,7 @@ class BackOffice:
             "cases": self.x("DELETE FROM cases WHERE user_id = ? AND status <> 'CONFIRMED_FRAUD'", (user_id,)).rowcount,
             "kept_fraud_cases": self.q("SELECT COUNT(*) AS n FROM cases WHERE user_id = ?", (user_id,))[0]["n"],
             "velocity_history": self.velocity.erase(user_id),
+            "consent_records": self.remote.erase(user_id),
         }
         self.x("DELETE FROM notes WHERE case_id NOT IN (SELECT id FROM cases)")
         return out
@@ -824,6 +827,43 @@ def register(app, *, bo, api_key, registry, dev_mode):
             return rule_change("rule_reject", rule, {"requested_by": pending["requested_by"]})
         return rule_change("rule_" + action, custom.retire(rule_id, user["username"], retired=action == "retire"))
 
+    # consent wording and the signed configuration the SDK obeys (remote.py)
+    @app.get("/v1/bo/consent")
+    def bo_consent():
+        need("viewer")
+        from .remote import CONSENT_GROUPS
+        return jsonify({"texts": bo.remote.all_texts(), "groups": list(CONSENT_GROUPS)})
+
+    @app.post("/v1/bo/consent")
+    def bo_consent_publish():
+        user = need("admin")
+        data = body()
+        if set(data) - {"group", "lang", "text"}:
+            raise ValidationFailure(400, "unknown_field", "send group, lang and text")
+        out = bo.remote.publish_text(data.get("group"), data.get("lang"), data.get("text"), user["username"])
+        bo.audit(user["username"], "consent_publish", f"{out['group']}:{out['lang']}", {"version": out["version"]})
+        return jsonify({"published": out, "texts": bo.remote.all_texts()}), 201
+
+    def config_view():
+        from .remote import COLLECT_KINDS, COLLECT_TEXT
+        return {"config": bo.remote.config, "key": bo.remote.public_key(),
+                "kinds": [{"name": k, "about": COLLECT_TEXT[k]} for k in COLLECT_KINDS]}
+
+    @app.get("/v1/bo/config")
+    def bo_config():
+        need("viewer")
+        return jsonify(config_view())
+
+    @app.put("/v1/bo/config")
+    def bo_config_update():
+        user = need("admin")
+        before, after = bo.remote.update_config(body())
+        if after["version"] != before["version"]:
+            bo.audit(user["username"], "config_update", "remote_config",
+                     {"before": {k: before[k] for k in ("collect", "flush_interval_ms")},
+                      "after": {k: after[k] for k in ("collect", "flush_interval_ms")}, "version": after["version"]})
+        return jsonify(config_view())
+
     # retention and erasure
     @app.post("/v1/bo/maintenance/purge")
     def bo_purge():
@@ -935,6 +975,7 @@ def register(app, *, bo, api_key, registry, dev_mode):
                           "device_guid": r.get("device_guid")} for r in recs[:100]],
             "latest": recs[0] if recs else None,  # full numbers behind the newest decision
             "usage": _usage_of(bo, user_id),
+            "consents": bo.remote.consent_history(user_id),
             "maturity": _maturity(_owner_status(current_app.fortguard_baselines, user_id)),
             "coverage": _coverage(recs[0] if recs else None),
         })

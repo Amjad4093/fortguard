@@ -59,6 +59,9 @@ internal class EnvironmentChecks(context: Context) {
     private var phoneListener: Any? = null
     private val prefs = app.getSharedPreferences("fortguard", Context.MODE_PRIVATE) // same file as FortGuard
 
+    /** Off when the bank's signed configuration switches location collection off for every customer. */
+    @Volatile var bankAllowsLocation = true
+
     // Call detail: which way the call went and when it was answered or dialled. Never the number.
     @Volatile private var callDirection = "unknown"
     @Volatile private var callStartedAt = 0L
@@ -138,6 +141,12 @@ internal class EnvironmentChecks(context: Context) {
             val operator = tm.simOperator.orEmpty()   // mobile country code + network code, e.g. 41001
             if (operator.matches(Regex("\\d{5,6}"))) out["carrier"] = operator
             if (tm.simState == TelephonyManager.SIM_STATE_READY) out["roaming"] = tm.isNetworkRoaming
+        }
+        runCatching {
+            // A phone's hotspot presents itself as a metered Wi-Fi network. Best guess: some paid Wi-Fi does too.
+            if (liveNetwork == "wifi") {
+                out["hotspot"] = (app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).isActiveNetworkMetered
+            }
         }
         simChanged?.let { out["sim_changed"] = it }
         keyboardChanged?.let { out["keyboard_changed"] = it }
@@ -354,7 +363,7 @@ internal class EnvironmentChecks(context: Context) {
 
     /** Coordinates rounded to about 1 km, and only when the customer agreed and the fix is under 30 minutes old. */
     private fun sharedLocation(fix: Location?): Map<String, Any?>? {
-        if (fix == null || !prefs.getBoolean("location_consent", false)) return null
+        if (fix == null || !bankAllowsLocation || !prefs.getBoolean("location_consent", false)) return null
         val ageS = ((System.currentTimeMillis() - fix.time) / 1000L).coerceAtLeast(0L)
         if (ageS > 1800) return null
         return linkedMapOf(

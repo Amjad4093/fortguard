@@ -228,6 +228,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         skew = abs(clock() * 1000 - payload["timestamp_ms"])
         if skew > config.MAX_SKEW_MS:
             return _error(400, "stale_timestamp", "timestamp_ms is too far from server time")
+        # Whatever the bank has switched off is dropped here too, so an old or altered app cannot keep sending it.
+        switched_off = bo.remote.enforce(payload)
         try:
             kept = store.ingest(payload, integrity=device.integrity, owner_proved=owner_proved,
                                 ip=client_ip(trust_proxy))
@@ -237,7 +239,26 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
             return _error(409, "device_mismatch", "session belongs to a different device")
         if payload.get("user_id"):  # the customer using the app, when the app says who it is
             bo.note_activity(payload["user_id"], _batch_span_ms(payload), payload.get("customer_name"))
-        return jsonify({"session_id": payload["session_id"], "accepted": kept}), 202
+            bo.remote.note_consent(payload["user_id"], payload["device_guid"], payload.get("consent", {}))
+        out = {"session_id": payload["session_id"], "accepted": kept, "config_version": bo.remote.config["version"]}
+        if switched_off:
+            out["switched_off"] = switched_off
+        return jsonify(out), 202
+
+    @app.get("/v1/consent")
+    def consent_texts():
+        """The consent wording to show a customer, in their language where the bank has published it."""
+        return jsonify({"groups": bo.remote.current_texts(request.args.get("lang", "en"))})
+
+    @app.get("/v1/config")
+    def remote_config():
+        """What the SDK may collect, signed. The SDK obeys it only when the signature checks out."""
+        return jsonify(bo.remote.signed())
+
+    @app.get("/v1/config/key")
+    def remote_config_key():
+        """The public key configurations are signed with, for building into the app."""
+        return jsonify(bo.remote.public_key())
 
     @app.post("/v1/risk/evaluate")
     def evaluate():

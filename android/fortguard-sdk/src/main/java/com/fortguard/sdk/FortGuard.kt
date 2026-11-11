@@ -51,6 +51,12 @@ object FortGuard {
         val flushIntervalMs: Long = 5_000,
         /** Production attestation (Play Integrity) goes here when it is built. */
         val attestationProvider: AttestationProvider? = null,
+        /**
+         * The bank's configuration-signing public key (DER SubjectPublicKeyInfo), from the back office's
+         * Data collection page. Build it into a production app. When null the SDK trusts the first key the
+         * server shows and remembers it, which is acceptable for a demo only.
+         */
+        val configPublicKey: ByteArray? = null,
     )
 
     data class Status(
@@ -97,6 +103,9 @@ object FortGuard {
         identityFields = storedIdentity(prefs)
         val guid = prefs.getString(KEY_GUID, null) ?: Ids.random("dev_", 12).also { prefs.edit().putString(KEY_GUID, it).apply() }
         timer?.cancel(false)
+        // Scheduled before the engine is built, so a saved configuration that changes the interval replaces this one.
+        flushEveryMs = config.flushIntervalMs
+        timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
         worker.execute {
             try {
                 val key = AndroidKeys.loadOrCreate() // may take a moment on StrongBox phones
@@ -110,8 +119,14 @@ object FortGuard {
                     log = { m -> lastMessage = m; log(m) }, buffer = buffer,
                     ownerProof = { p -> OwnerKeys.proofFor(p) },
                     identity = { identityFields },
+                    configKey = config.configPublicKey,
+                    configMemory = PrefsMemory(prefs),
                 )
                 engine!!.consentBehavioral = buffer.enabled // consent may have been set before the engine existed
+                if (prefs.contains("location_consent")) engine!!.consentLocation = prefs.getBoolean("location_consent", false)
+                engine!!.consentTexts = storedConsentTexts(prefs)
+                engine!!.onPolicy = { policy -> applyPolicy(policy) }
+                applyPolicy(engine!!.policy)   // a configuration saved by an earlier run is already in force
                 lastMessage = "ready"
                 val e = engine!!.enroll()
                 lastMessage = e.message
@@ -121,8 +136,9 @@ object FortGuard {
                 log(lastMessage)
             }
         }
-        timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
     }
+
+    @Volatile private var flushEveryMs = 5_000L
 
     @Volatile private var ownerWindowUntilMs = 0L
     @Volatile private var motionServiceRunning = false
@@ -214,6 +230,49 @@ object FortGuard {
     fun setLocationConsent(context: Context, granted: Boolean) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("location_consent", granted).apply()
+        engine?.consentLocation = granted
+    }
+
+    /**
+     * Records which published consent wording the customer accepted, so the bank can show what was
+     * agreed to and in which words. [group] is "behavioural" or "location"; [lang] and [version] come
+     * from the server's GET /v1/consent-texts.
+     */
+    fun acceptedConsentText(context: Context, group: String, lang: String, version: Long) {
+        require(group == "behavioural" || group == "location") { "group must be behavioural or location" }
+        require(Regex("[a-z]{2,3}(-[A-Z]{2})?").matches(lang) && version in 1..100_000) { "bad language or version" }
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString("consent_text_$group", "$lang|$version").apply()
+        engine?.consentTexts = storedConsentTexts(prefs)
+    }
+
+    /** What the bank's signed configuration currently lets this SDK collect. */
+    val policy: com.fortguard.sdk.core.CollectionPolicy? get() = engine?.policy
+
+    private fun storedConsentTexts(prefs: android.content.SharedPreferences): Map<String, Pair<String, Long>> {
+        val out = LinkedHashMap<String, Pair<String, Long>>()
+        for (group in listOf("behavioural", "location")) {
+            val parts = prefs.getString("consent_text_$group", null)?.split('|') ?: continue
+            val version = parts.getOrNull(1)?.toLongOrNull() ?: continue
+            out[group] = parts[0] to version
+        }
+        return out
+    }
+
+    /** Obeys a configuration whose signature the engine has already checked. */
+    private fun applyPolicy(policy: com.fortguard.sdk.core.CollectionPolicy) {
+        env?.bankAllowsLocation = policy.location
+        if (policy.version > 0 && policy.flushIntervalMs != flushEveryMs) {
+            flushEveryMs = policy.flushIntervalMs
+            timer?.cancel(false)
+            timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, flushEveryMs, flushEveryMs, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    /** Remembers the trusted configuration key and the last accepted configuration across app starts. */
+    private class PrefsMemory(private val prefs: android.content.SharedPreferences) : com.fortguard.sdk.core.ConfigMemory {
+        override fun get(name: String): String? = prefs.getString("remote_$name", null)
+        override fun put(name: String, value: String) { prefs.edit().putString("remote_$name", value).apply() }
     }
 
     fun isLocationConsent(context: Context): Boolean =
@@ -232,7 +291,7 @@ object FortGuard {
     fun attach(activity: Activity) {
         val window = activity.window
         if (attached.containsKey(activity)) return
-        val cb = TouchCallback(window.callback, buffer)
+        val cb = TouchCallback(window.callback, buffer) { window.peekDecorView() }
         window.callback = cb
         attached[activity] = cb
         env?.onAttach(activity)

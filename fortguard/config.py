@@ -105,6 +105,12 @@ HESITATION_FULL_MS = 10000        # counted pause time that maps to an index of 
 HESITATION_IGNORED_FIELDS = frozenset({"username", "password", "otp"})
 HESITATION_FLAG = 0.6             # index at or above this is flagged
 TREMOR_BAND_HZ = (4.0, 12.0)
+# Walking: a steady rhythm in the accelerometer at step frequency. Judgement calls, not measured on real phones.
+WALK_BAND_HZ = (1.2, 2.8)         # steps a second for a slow walk up to a brisk one
+WALK_MIN_SPAN_S = 3.0             # motion needed before a rhythm can be told from a jolt
+WALK_MIN_SHARE = 0.35             # share of the movement's power that must sit in the step band
+WALK_MIN_STD = 0.6                # and the movement must be this strong (m/s^2); a hand typing is far below
+FIELD_TIME_CAP_MS = 120_000       # the most one stay in a field counts for: longer is a walk away, not entry
 
 # --- Velocity thresholds (judgement calls, not measured on real customers) ---------
 VELOCITY_PAYMENTS_24H = 15          # payments by one customer in 24 hours, counting the one being decided

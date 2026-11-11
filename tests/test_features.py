@@ -218,3 +218,47 @@ def test_a_flat_but_moving_phone_is_not_lying_flat():
 def test_tilt_is_unknown_without_motion_data():
     assert features.tilt(0.0, 0.0, 0.0, 0, None) == (None, None, None)
     assert features.tilt(0.0, 0.0, 9.8, 5, 0.001)[2] is None       # too few samples to call it flat
+
+
+# --- Walking, time in a field, tap offset, autofill ---------------------------------------------------
+
+def _accel(seconds, hz, wave):
+    # Walking bounces the phone along gravity, so the wave is added to the axis gravity is on.
+    return [{"x": 0.0, "y": 0.0, "z": 9.81 + wave(i / hz), "ts": int(i * 1000 / hz)} for i in range(int(seconds * hz))]
+
+
+def test_a_steady_two_steps_a_second_is_walking():
+    import math
+    cadence, walking = features.step_cadence(_accel(6, 50, lambda t: 2.5 * math.sin(2 * math.pi * 2.0 * t)))
+    assert walking == 1.0 and cadence == pytest.approx(2.0, abs=0.2)
+
+
+def test_a_phone_held_still_or_shaken_fast_is_not_walking():
+    import math
+    assert features.step_cadence(_accel(6, 50, lambda t: 0.02 * math.sin(2 * math.pi * 2.0 * t))) == (None, 0.0)
+    assert features.step_cadence(_accel(6, 50, lambda t: 2.5 * math.sin(2 * math.pi * 9.0 * t))) == (None, 0.0)
+
+
+def test_too_little_motion_data_gives_no_answer_about_walking():
+    assert features.step_cadence(_accel(1, 50, lambda t: 2.0)) == (None, None)
+    assert features.step_cadence([]) == (None, None)
+
+
+def test_time_in_a_field_runs_from_focus_to_the_next_focus_or_submit():
+    ui = [_ui("FOCUS", 1_000, "beneficiary_account"), _ui("PASTE", 2_000, "beneficiary_account"),
+          _ui("FOCUS", 9_000, "amount"), _ui("SUBMIT", 12_000), _ui("FOCUS", 20_000, "amount")]
+    totals, stays = features.field_times(sorted(features.field_marks(ui)))
+    assert totals == {"beneficiary_account": 8_000, "amount": 3_000}   # the last focus has no end yet
+    assert stays == [8_000, 3_000]
+
+
+def test_one_stay_in_a_field_is_capped():
+    ui = [_ui("FOCUS", 0, "amount"), _ui("SUBMIT", 10 * 60_000)]
+    assert features.field_times(sorted(features.field_marks(ui), key=lambda m: m[0]))[1] == [config.FIELD_TIME_CAP_MS]
+
+
+def test_tap_offset_is_the_distance_from_the_centre_of_the_control():
+    touch = [{"event_type": "DOWN", "x": 1, "y": 1, "timestamp_ms": 1, "tdx": 0.3, "tdy": -0.4},
+             {"event_type": "DOWN", "x": 1, "y": 1, "timestamp_ms": 2},                       # control not known
+             {"event_type": "UP", "x": 1, "y": 1, "timestamp_ms": 3}]
+    assert features.tap_offsets(touch) == [pytest.approx(0.5)]
