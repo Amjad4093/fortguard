@@ -50,6 +50,8 @@ class MainActivity : Activity() {
         const val DEMO_NAME = "Demo Customer"
         const val REQ_PHONE = 2
         const val REQ_LOCATION = 3
+        const val VERIFY_PHRASE = "My money is safe with FortGuard"
+        const val VERIFY_MIN_CHARS = 15
         const val DEMO_BALANCE = "PKR 245,300.00"
         const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
 
@@ -287,7 +289,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Brand.NAVY)
         }
-        for ((key, label) in listOf("home" to "Home", "transfer" to "Send", "signals" to "Signals", "settings" to "Settings")) {
+        for ((key, label) in listOf("home" to "Home", "verify" to "Is it me?", "transfer" to "Send", "signals" to "Signals", "settings" to "Settings")) {
             // Each tab is a short accent bar above its label; the bar shows only on the selected tab.
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -318,6 +320,7 @@ class MainActivity : Activity() {
         currentTab = key
         val view = tabViews[key] ?: when (key) {
             "home" -> buildHome()
+            "verify" -> buildVerify()
             "transfer" -> buildTransfer()
             "signals" -> buildSignals()
             else -> buildSettings()
@@ -368,12 +371,120 @@ class MainActivity : Activity() {
         model.addView(homeModel)
         col.addView(model, lp(bottom = 16))
 
+        col.addView(primaryButton("Is it me? Check who is using the app") { selectTab("verify") }, lp(bottom = 10))
         col.addView(row(
-            primaryButton("Send money") { selectTab("transfer") },
+            outlineButton("Send money") { selectTab("transfer") },
             outlineButton("See signals") { selectTab("signals") },
         ))
         col.addView(text("Typed text never leaves this phone. Only timing and character counts are sent.", 12f, MUTED).apply { setPadding(0, dp(16), 0, 0) })
         return scroll(col)
+    }
+
+    // --- "Is it me?" -------------------------------------------------------------------------------------
+
+    private lateinit var verifyInput: EditText
+    private lateinit var verifyButton: Button
+    private lateinit var verifyResult: LinearLayout
+
+    /**
+     * One screen, one question: does the person holding the phone use it like the account holder? The
+     * customer types a short sentence and taps around naturally; the server compares that behaviour with
+     * the profile learned from earlier sessions. No money moves.
+     */
+    private fun buildVerify(): View {
+        val col = column()
+        col.addView(eyebrow("Identity check"))
+        col.addView(text("Is it really you?", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, dp(6)) })
+        col.addView(text("Type the sentence below the way you normally type, then tap Check. FortGuard compares how you type, touch and hold the phone with how the account holder does. Nothing you type is sent, only its timing.",
+            14f, MUTED).apply { setPadding(0, 0, 0, dp(14)) })
+
+        val form = card()
+        form.addView(label("Type this sentence"))
+        form.addView(text("“$VERIFY_PHRASE”", 16f, INK, bold = true).apply { setPadding(0, 0, 0, dp(8)) })
+        verifyInput = input("Type it here", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        form.addView(verifyInput)
+        FortGuard.watch(verifyInput, Field.OTHER)
+        verifyButton = primaryButton("Check") { checkIdentity() }
+        form.addView(verifyButton, lp(top = 14))
+        col.addView(form, lp(bottom = 14))
+
+        verifyResult = card()
+        col.addView(verifyResult)
+        showVerifyNote("Your answer appears here.", MUTED)
+        return scroll(col)
+    }
+
+    private fun checkIdentity() {
+        if (verifyInput.text.trim().length < VERIFY_MIN_CHARS) {
+            showVerifyNote("Type at least $VERIFY_MIN_CHARS characters of the sentence first, so there is typing to compare.", WARN)
+            return
+        }
+        verifyButton.isEnabled = false
+        verifyButton.alpha = 0.5f
+        showVerifyNote("Checking…", MUTED)
+        FortGuard.submit { outcome ->
+            if (!outcome.ok) {
+                ui.post { verifyDone(); showVerifyNote("Telemetry not accepted: ${outcome.message}", DANGER) }
+                return@submit
+            }
+            val session = FortGuard.sessionId ?: return@submit
+            val url = prefs.getString("server", DEFAULT_SERVER)!!.trim()
+            val key = prefs.getString("api_key", "")!!.trim()
+            val userId = userId()
+            io.execute {
+                val result = DemoBackend.identityCheck(url, key, session, userId)
+                ui.post {
+                    verifyDone()
+                    result.fold(::showIdentity) { showVerifyNote("Check failed: ${it.message}", DANGER) }
+                }
+            }
+        }
+    }
+
+    private fun verifyDone() {
+        verifyButton.isEnabled = true
+        verifyButton.alpha = 1f
+        verifyInput.setText("")
+    }
+
+    private fun showIdentity(d: DemoBackend.Decision) {
+        val (badge, title, tone) = when (d.identity) {
+            "OWNER_LIKELY" -> Triple("ALLOW", "Yes, this looks like you", ACCENT)
+            "NOT_OWNER_LIKELY" -> Triple("BLOCK", "This does not look like you", DANGER)
+            "LEARNING" -> Triple("STEP_UP", "Still learning you", WARN)
+            else -> Triple("STEP_UP", "Not enough to go on", WARN)
+        }
+        verifyResult.removeAllViews()
+        verifyResult.background = rounded(CARD, 18, tone)
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(BadgeView(this, badge), LinearLayout.LayoutParams(dp(56), dp(56)))
+        head.addView(text(title, 21f, tone, bold = true).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        verifyResult.addView(head)
+        verifyResult.addView(text(d.identityText, 14f, INK).apply { setPadding(0, dp(12), 0, 0) })
+        if (d.identity == "LEARNING") {
+            verifyResult.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = d.identityRequired.coerceAtLeast(1)
+                progress = d.identitySessions.coerceIn(0, max)
+                progressTintList = ColorStateList.valueOf(ACCENT)
+            }, lp(top = 10))
+            verifyResult.addView(text("Each check or payment that FortGuard allows teaches it a little more. Only you should use the phone until it has learned.",
+                12f, MUTED).apply { setPadding(0, dp(8), 0, 0) })
+        }
+        if (d.identity == "NOT_OWNER_LIKELY") {
+            verifyResult.addView(text("A bank app would now ask for a fingerprint or face check before any payment.", 12f, MUTED).apply { setPadding(0, dp(8), 0, 0) })
+        }
+        verifyResult.addView(text("This is a judgement from behaviour, not proof. A few unusual sessions can happen to anyone.", 12f, MUTED).apply { setPadding(0, dp(10), 0, 0) })
+        if (::homeModel.isInitialized) {
+            homeModel.text = d.identityText
+            homeModel.setTextColor(identityColor(d))
+        }
+        FortGuard.newSession()   // the next check measures fresh behaviour
+    }
+
+    private fun showVerifyNote(message: String, color: Int) {
+        verifyResult.removeAllViews()
+        verifyResult.background = rounded(CARD, 18, Brand.LINE)
+        verifyResult.addView(text(message, 14f, color))
     }
 
     private fun buildTransfer(): View {

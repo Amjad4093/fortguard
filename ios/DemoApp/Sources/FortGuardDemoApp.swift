@@ -58,6 +58,7 @@ enum DemoBackend {
         "REASON_SIM_SWAP_PATTERN": "SIM changed and money is going to a new payee: the usual shape of a SIM-swap takeover.",
         "REASON_ON_DENY_LIST": "The customer, device, payee account or network address is on the bank's deny list.",
         "REASON_ML_BEHAVIOR_ANOMALY": "The learning model found this session unlike your usual ones.",
+        "REASON_NOT_ACCOUNT_HOLDER": "This does not look like the account holder, so the payment needs a fingerprint or face check.",
         "REASON_VPN_OR_PROXY": "A VPN or proxy is active.",
         "REASON_ACTIVE_CALL_DURING_PAYMENT": "A call is active during the payment.",
         "REASON_PASTE_ACTIVITY_IN_BENEFICIARY_FIELD": "The beneficiary account was pasted.",

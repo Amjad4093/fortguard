@@ -14,6 +14,7 @@ FORCE_STEP_UP_REASONS = (
     "REASON_EMULATOR_DETECTED",
     "REASON_HOOKING_FRAMEWORK_DETECTED",
     "REASON_DEBUGGER_ATTACHED",
+    "REASON_NOT_ACCOUNT_HOLDER",
     "REASON_REMOTE_ACCESS_TOOL_ACTIVE",
 )
 BOT_REASONS = (
@@ -175,6 +176,8 @@ def score_session(session, event_type, tx, baselines=None, user_id=None, denied=
         ml = baselines.assess_ml(user_id, feats)
         if ml["anomalous"]:
             reasons.append("REASON_ML_BEHAVIOR_ANOMALY")
+        if sensitive and ("REASON_BEHAVIORAL_ANOMALY_HIGH" in reasons or ml["anomalous"]):
+            reasons.append("REASON_NOT_ACCOUNT_HOLDER")
 
     if (
         sensitive

@@ -308,7 +308,11 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         bo.velocity.record(body["user_id"], getattr(session, "device_guid", None), body["event_type"],
                            body.get("transaction_details"), body["session_id"], now_ms)
         app.fortguard_metrics.decision(result["risk_level"], result.get("degraded"))
-        if feats is not None and (result["risk_level"] == "ALLOW" or getattr(session, "owner_proved", False)):
+        # Learn from allowed sessions, except one judged not the account holder: a stranger's sign-in or
+        # identity check is allowed (it moves no money) but must not teach the profile the stranger's habits.
+        # A fingerprint or face check by the owner overrides both.
+        doubted = (result.get("identity") or {}).get("verdict") == "NOT_OWNER_LIKELY"
+        if feats is not None and ((result["risk_level"] == "ALLOW" and not doubted) or getattr(session, "owner_proved", False)):
             baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))
 
         if request_id:

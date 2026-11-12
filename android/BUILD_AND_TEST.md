@@ -94,9 +94,10 @@ happened instead; a screenshot of the result card or the portal page is the most
    samples for each sensor the phone has, and "Readings from the other sensors" should show light and the rest.
 5. **A long session keeps its sensors.** Leave the app open on one screen for 10 minutes, then check a payment.
    The sensors should still show samples (the SDK starts a new session before the old one fills up).
-6. **Who is using the app.** Do 10 allowed payment checks as yourself. The card should count "1 of 10" up to
-   "10 of 10", then say "looks like the account holder". Hand the phone to someone else for the 11th: the
-   answer should change, though a few sessions are not proof either way.
+6. **Is it me?** Open the "Is it me?" tab, type the sentence and tap Check, 10 times as yourself. It should
+   count "1 of 10" up to "10 of 10", then answer "Yes, this looks like you". Then hand the phone to someone
+   else: they type the sentence and tap Check, and the answer should be "This does not look like you". If
+   they then send money, the payment should ask for a fingerprint. One session is a judgement, not proof.
 7. **Calls.** Allow call detection in Settings, make a normal call, check a payment during it. "Call in
    progress" should be a reason and the portal should show the direction and duration.
 

@@ -165,7 +165,9 @@ def test_the_customers_own_sessions_are_rarely_flagged(api, make_session, clock)
     results = [go(api, make_session, "genuine", 400 + i) for i in range(25)]
     flagged_own = sum(r["ml"]["anomalous"] for r in results)
     assert flagged_own <= 2, f"{flagged_own} of 25 genuine sessions were flagged"
-    assert all(r["risk_level"] == "ALLOW" for r in results), "a lone model flag must not block a customer"
+    # A lone model flag on a payment asks for a fingerprint or face check; it never blocks the customer.
+    assert all(r["risk_level"] != "BLOCK" for r in results), "a lone model flag must not block a customer"
+    assert all(r["risk_level"] == ("STEP_UP" if r["ml"]["anomalous"] else "ALLOW") for r in results)
 
 
 def test_a_session_reported_as_fraud_is_removed_from_the_model(api, app, make_session):

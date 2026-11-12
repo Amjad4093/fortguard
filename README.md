@@ -143,6 +143,8 @@ allowed sessions, `MATURE`), and once mature the biometric match score (0 to 1) 
 Each response also carries `ml`: the per-customer machine-learning anomaly model (`fortguard/mlmodel.py`).
 It is `LEARNING` below 10 allowed sessions and `ACTIVE` after that, when `scoring_mode` becomes
 `RULES_AND_ML`. A session unlike the customer's own past sessions adds `REASON_ML_BEHAVIOR_ANOMALY`.
+On a payment, new payee or profile change, either model's doubt also adds `REASON_NOT_ACCOUNT_HOLDER`,
+which forces at least a step-up.
 What the model is, the evidence for it and its limits are in [docs/ML.md](docs/ML.md).
 
 Every response has an `X-Request-ID` and security headers. Rate limits per minute: sign-in 20 and device

@@ -74,6 +74,9 @@ WEIGHTS = {
     # The machine-learning model finds the session unlike this customer's own past sessions
     # (fortguard/mlmodel.py). On its own it does not reach the step-up band; with the rule above it does.
     "REASON_ML_BEHAVIOR_ANOMALY": 300,
+    # Added on a payment, payee or profile change when either model says the user is not the account
+    # holder. It forces at least a step-up, so one model's doubt is enough to ask for a fingerprint.
+    "REASON_NOT_ACCOUNT_HOLDER": 100,
 }
 
 # Rules that lift the score to at least the STEP_UP band, whatever else is true.

@@ -91,3 +91,46 @@ def test_baseline_shows_in_the_back_office_record(api, app, make_session):
     go(api, make_session, "genuine", 1)
     record = app.fortguard_decisions.snapshot()[0]
     assert record["baseline"]["status"] == "NONE"
+
+
+def _doubting(app, monkeypatch):
+    """Makes the profile say every session is unlike the customer, as it would for another person."""
+    real = app.fortguard_baselines.assess
+
+    def assess(user_id, feats):
+        baseline, _ = real(user_id, feats)
+        return dict(baseline, match_score=0.1), True
+    monkeypatch.setattr(app.fortguard_baselines, "assess", assess)
+
+
+def test_someone_else_paying_from_the_phone_is_stepped_up(api, app, make_session, monkeypatch):
+    mature(api, make_session)
+    _doubting(app, monkeypatch)
+    b = go(api, make_session, "genuine", 901)
+    assert "REASON_NOT_ACCOUNT_HOLDER" in b["reason_codes"]
+    assert b["risk_level"] == "STEP_UP", b                       # one model's doubt is enough on a payment
+    assert b["identity"]["verdict"] == "NOT_OWNER_LIKELY"
+
+
+def test_doubt_on_a_sign_in_or_identity_check_is_reported_but_not_forced(api, app, make_session, monkeypatch):
+    mature(api, make_session)
+    _doubting(app, monkeypatch)
+    s = make_session("genuine", 902)
+    s["evaluate"].update(user_id="usr_baseline1", event_type="LOGIN")
+    s["evaluate"].pop("transaction_details", None)
+    s["evaluate"].pop("request_id", None)
+    b = run_session(api, s)[1]
+    assert "REASON_NOT_ACCOUNT_HOLDER" not in b["reason_codes"]
+    assert b["identity"]["verdict"] == "NOT_OWNER_LIKELY"
+
+
+def test_a_session_judged_not_the_owner_is_not_learned(api, app, make_session, monkeypatch):
+    mature(api, make_session)
+    before = app.fortguard_baselines.profile("usr_baseline1")["sessions"]
+    _doubting(app, monkeypatch)
+    s = make_session("genuine", 903)
+    s["evaluate"].update(user_id="usr_baseline1", event_type="LOGIN")
+    s["evaluate"].pop("transaction_details", None)
+    s["evaluate"].pop("request_id", None)
+    assert run_session(api, s)[1]["risk_level"] == "ALLOW"
+    assert app.fortguard_baselines.profile("usr_baseline1")["sessions"] == before

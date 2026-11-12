@@ -35,19 +35,27 @@ object DemoBackend {
     fun evaluate(
         baseUrl: String, apiKey: String, sessionId: String, userId: String,
         amount: Double, beneficiary: String, newPayee: Boolean,
-    ): Result<Decision> = runCatching {
-        val r = ApiClient(baseUrl).postJson(
-            "/v1/risk/evaluate",
-            mapOf(
-                "session_id" to sessionId, "user_id" to userId, "event_type" to "FUNDS_TRANSFER",
-                "request_id" to Ids.random("req_", 12),
-                "transaction_details" to mapOf(
-                    "amount" to amount, "currency" to "PKR",
-                    "beneficiary_account" to beneficiary, "is_new_beneficiary" to newPayee,
-                ),
-            ),
-            mapOf("X-API-Key" to apiKey),
-        )
+    ): Result<Decision> = ask(baseUrl, apiKey, mapOf(
+        "session_id" to sessionId, "user_id" to userId, "event_type" to "FUNDS_TRANSFER",
+        "request_id" to Ids.random("req_", 12),
+        "transaction_details" to mapOf(
+            "amount" to amount, "currency" to "PKR",
+            "beneficiary_account" to beneficiary, "is_new_beneficiary" to newPayee,
+        ),
+    ))
+
+    /**
+     * "Is it me?": asks the server about this session without any payment. It is sent as a sign-in check,
+     * so it moves no money and the server never forces a step-up for it; only the identity answer matters.
+     */
+    fun identityCheck(baseUrl: String, apiKey: String, sessionId: String, userId: String): Result<Decision> =
+        ask(baseUrl, apiKey, mapOf(
+            "session_id" to sessionId, "user_id" to userId, "event_type" to "LOGIN",
+            "request_id" to Ids.random("req_", 12),
+        ))
+
+    private fun ask(baseUrl: String, apiKey: String, body: Map<String, Any?>): Result<Decision> = runCatching {
+        val r = ApiClient(baseUrl).postJson("/v1/risk/evaluate", body, mapOf("X-API-Key" to apiKey))
         check(r.status == 200) { r.describe() }
         val b = r.body
         val threat = b["threat_details"] as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -90,6 +98,7 @@ object DemoBackend {
         "REASON_SIM_SWAP_PATTERN" to "SIM changed and money is going to a new payee: the usual shape of a SIM-swap takeover.",
         "REASON_ON_DENY_LIST" to "The customer, device, payee account or network address is on the bank's deny list.",
         "REASON_ML_BEHAVIOR_ANOMALY" to "The learning model found this session unlike your usual ones.",
+        "REASON_NOT_ACCOUNT_HOLDER" to "This does not look like the account holder, so the payment needs a fingerprint or face check.",
         "REASON_VPN_OR_PROXY" to "A VPN or proxy is active.",
         "REASON_ACTIVE_CALL_DURING_PAYMENT" to "A call is active during the payment.",
         "REASON_PASTE_ACTIVITY_IN_BENEFICIARY_FIELD" to "The beneficiary account was pasted.",
