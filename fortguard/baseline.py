@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS baseline_sessions (
     user_id TEXT NOT NULL, session_id TEXT NOT NULL, time_ms INTEGER NOT NULL, features TEXT NOT NULL,
     PRIMARY KEY (user_id, session_id));
 CREATE INDEX IF NOT EXISTS baseline_user_time ON baseline_sessions(user_id, time_ms);
+CREATE TABLE IF NOT EXISTS rhythm_samples (
+    user_id TEXT NOT NULL, session_id TEXT NOT NULL, time_ms INTEGER NOT NULL, gaps TEXT NOT NULL,
+    PRIMARY KEY (user_id, session_id));
 """
 
 
@@ -50,6 +53,12 @@ def _vector(feats):
             continue
         out[name] = math.log10(max(v, 1e-9)) if name in LOG_FEATURES else float(v)
     return out
+
+
+def profile_key(user_id, event_type):
+    """Which profile a session is learned into and judged against: sign-in and identity checks have
+    their own, apart from payments and account changes. '#' cannot occur in a customer id."""
+    return user_id + config.PROFILE_SCOPE_SUFFIX if event_type == "LOGIN" else user_id
 
 
 class Baselines:
@@ -141,10 +150,14 @@ class Baselines:
     def forget(self, session_id):
         """Remove a session from every baseline, for example after it is reported as fraud."""
         n = self.bo.x("DELETE FROM baseline_sessions WHERE session_id=?", (session_id,)).rowcount
+        self.bo.x("DELETE FROM rhythm_samples WHERE session_id=?", (session_id,))   # see rhythm.py
         self._invalidate()
         return n
 
     def forget_user(self, user_id):
-        n = self.bo.x("DELETE FROM baseline_sessions WHERE user_id=?", (user_id,)).rowcount
+        check = user_id + config.PROFILE_SCOPE_SUFFIX
+        n = self.bo.x("DELETE FROM baseline_sessions WHERE user_id IN (?,?)", (user_id, check)).rowcount
+        self.bo.x("DELETE FROM rhythm_samples WHERE user_id=?", (user_id,))
         self._invalidate(user_id)
+        self._invalidate(check)
         return n

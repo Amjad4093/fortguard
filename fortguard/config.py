@@ -156,6 +156,18 @@ BASELINE_REL_SD_FLOOR = 0.10    # spread never treated as smaller than 10% of th
 BASELINE_ANOMALY_BELOW = 0.35   # match score that raises REASON_BEHAVIORAL_ANOMALY_HIGH
 
 # --- Machine-learning anomaly model (fortguard/mlmodel.py) ------------------------------------------
+# --- Typing rhythm of the "Is it me?" sentence. Judgement calls, not measured on real customers. ---
+RHYTHM_MIN_SAMPLES = 10         # clean samples of the sentence before a check is judged
+RHYTHM_WINDOW = 20              # most recent samples kept per customer
+RHYTHM_MIN_KEYS = 12            # a shorter sentence has too few gaps to compare
+RHYTHM_GAP_CAP_MS = 1500        # one long hesitation counts as this at most
+RHYTHM_REL_FLOOR = 0.15         # a gap's spread is never treated as smaller than 15% of its mean
+RHYTHM_ABS_FLOOR_MS = 20
+RHYTHM_LIMIT_SDS = 2.0          # limit = mean + this many deviations of the customer's own distances
+# Sign-in and identity-check sessions are learned apart from payments: typing a sentence or a password
+# and typing an account number and an amount are different behaviour, and one must not judge the other.
+PROFILE_SCOPE_SUFFIX = "#check"
+
 ML_MIN_SESSIONS = 10            # learned sessions needed before the model has an opinion
 ML_MIN_FEATURES = 4             # features a session needs to be scored
 ML_FEATURE_PRESENT = 0.8        # a feature is used when this share of the customer's sessions has it

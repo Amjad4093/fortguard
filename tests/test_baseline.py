@@ -112,25 +112,38 @@ def test_someone_else_paying_from_the_phone_is_stepped_up(api, app, make_session
     assert b["identity"]["verdict"] == "NOT_OWNER_LIKELY"
 
 
-def test_doubt_on_a_sign_in_or_identity_check_is_reported_but_not_forced(api, app, make_session, monkeypatch):
-    mature(api, make_session)
-    _doubting(app, monkeypatch)
-    s = make_session("genuine", 902)
-    s["evaluate"].update(user_id="usr_baseline1", event_type="LOGIN")
+def sign_in(api, make_session, seed, user="usr_baseline1"):
+    s = make_session("genuine", seed)
+    s["evaluate"].update(user_id=user, event_type="LOGIN")
     s["evaluate"].pop("transaction_details", None)
     s["evaluate"].pop("request_id", None)
-    b = run_session(api, s)[1]
+    return run_session(api, s)[1]
+
+
+def test_doubt_on_a_sign_in_is_reported_but_not_forced(api, app, make_session, monkeypatch):
+    for i in range(config.BASELINE_MIN_SESSIONS):
+        sign_in(api, make_session, 300 + i)
+    _doubting(app, monkeypatch)
+    b = sign_in(api, make_session, 902)
     assert "REASON_NOT_ACCOUNT_HOLDER" not in b["reason_codes"]
     assert b["identity"]["verdict"] == "NOT_OWNER_LIKELY"
 
 
 def test_a_session_judged_not_the_owner_is_not_learned(api, app, make_session, monkeypatch):
-    mature(api, make_session)
-    before = app.fortguard_baselines.profile("usr_baseline1")["sessions"]
+    for i in range(config.BASELINE_MIN_SESSIONS):
+        sign_in(api, make_session, 300 + i)
+    key = "usr_baseline1" + config.PROFILE_SCOPE_SUFFIX
+    before = app.fortguard_baselines.profile(key)["sessions"]
     _doubting(app, monkeypatch)
-    s = make_session("genuine", 903)
-    s["evaluate"].update(user_id="usr_baseline1", event_type="LOGIN")
-    s["evaluate"].pop("transaction_details", None)
-    s["evaluate"].pop("request_id", None)
-    assert run_session(api, s)[1]["risk_level"] == "ALLOW"
-    assert app.fortguard_baselines.profile("usr_baseline1")["sessions"] == before
+    assert sign_in(api, make_session, 903)["risk_level"] == "ALLOW"
+    assert app.fortguard_baselines.profile(key)["sessions"] == before == config.BASELINE_MIN_SESSIONS
+
+
+def test_sign_ins_and_payments_are_learned_apart(api, app, make_session):
+    """The fault this replaces: ten identity checks taught a profile that then judged a payment."""
+    for i in range(config.BASELINE_MIN_SESSIONS):
+        sign_in(api, make_session, 300 + i)
+    assert app.fortguard_baselines.profile("usr_baseline1")["sessions"] == 0
+    payment = go(api, make_session, "genuine", 500)
+    assert payment["identity"]["verdict"] == "LEARNING" and payment["identity"]["sessions"] == 0
+    assert "REASON_NOT_ACCOUNT_HOLDER" not in payment["reason_codes"]

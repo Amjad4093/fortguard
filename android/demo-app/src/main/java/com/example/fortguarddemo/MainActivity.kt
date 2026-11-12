@@ -50,8 +50,7 @@ class MainActivity : Activity() {
         const val DEMO_NAME = "Demo Customer"
         const val REQ_PHONE = 2
         const val REQ_LOCATION = 3
-        const val VERIFY_PHRASE = "My money is safe with FortGuard"
-        const val VERIFY_MIN_CHARS = 15
+        const val VERIFY_PHRASE = "my money is safe with fortguard"
         const val DEMO_BALANCE = "PKR 245,300.00"
         const val DEFAULT_SERVER = "https://hadier.pythonanywhere.com"
 
@@ -395,13 +394,15 @@ class MainActivity : Activity() {
         val col = column()
         col.addView(eyebrow("Identity check"))
         col.addView(text("Is it really you?", 24f, INK, bold = true).apply { setPadding(0, dp(4), 0, dp(6)) })
-        col.addView(text("Type the sentence below the way you normally type, then tap Check. FortGuard compares how you type, touch and hold the phone with how the account holder does. Nothing you type is sent, only its timing.",
+        col.addView(text("Type the sentence below the way you normally type, in one go and without corrections, then tap Check. FortGuard compares the rhythm of your typing with the account holder's. Nothing you type is sent, only its timing.",
             14f, MUTED).apply { setPadding(0, 0, 0, dp(14)) })
 
         val form = card()
         form.addView(label("Type this sentence"))
         form.addView(text("“$VERIFY_PHRASE”", 16f, INK, bold = true).apply { setPadding(0, 0, 0, dp(8)) })
-        verifyInput = input("Type it here", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        // "Visible password" is the input type keyboards reliably leave alone: no suggestions, no
+        // auto-correction, no automatic capitals. Each key press then arrives as exactly one character.
+        verifyInput = input("Type it here", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
         form.addView(verifyInput)
         FortGuard.watch(verifyInput, Field.OTHER)
         verifyButton = primaryButton("Check") { checkIdentity() }
@@ -415,8 +416,10 @@ class MainActivity : Activity() {
     }
 
     private fun checkIdentity() {
-        if (verifyInput.text.trim().length < VERIFY_MIN_CHARS) {
-            showVerifyNote("Type at least $VERIFY_MIN_CHARS characters of the sentence first, so there is typing to compare.", WARN)
+        if (!verifyInput.text.toString().trim().equals(VERIFY_PHRASE, ignoreCase = true)) {
+            // The rhythm is compared key by key, so the sentence has to be the same every time.
+            showVerifyNote("That is not the sentence. Type it exactly, in one go: “$VERIFY_PHRASE”", WARN)
+            verifyRestart()
             return
         }
         verifyButton.isEnabled = false
@@ -424,7 +427,7 @@ class MainActivity : Activity() {
         showVerifyNote("Checking…", MUTED)
         FortGuard.submit { outcome ->
             if (!outcome.ok) {
-                ui.post { verifyDone(); showVerifyNote("Telemetry not accepted: ${outcome.message}", DANGER) }
+                ui.post { verifyDone(); showVerifyNote("Telemetry not accepted: ${outcome.message}", DANGER); verifyRestart() }
                 return@submit
             }
             val session = FortGuard.sessionId ?: return@submit
@@ -435,7 +438,7 @@ class MainActivity : Activity() {
                 val result = DemoBackend.identityCheck(url, key, session, userId)
                 ui.post {
                     verifyDone()
-                    result.fold(::showIdentity) { showVerifyNote("Check failed: ${it.message}", DANGER) }
+                    result.fold(::showIdentity) { showVerifyNote("Check failed: ${it.message}", DANGER); verifyRestart() }
                 }
             }
         }
@@ -444,7 +447,12 @@ class MainActivity : Activity() {
     private fun verifyDone() {
         verifyButton.isEnabled = true
         verifyButton.alpha = 1f
+    }
+
+    /** Empties the field and starts a fresh session, so the next attempt is measured from a clean start. */
+    private fun verifyRestart() {
         verifyInput.setText("")
+        FortGuard.newSession()
     }
 
     private fun showIdentity(d: DemoBackend.Decision) {
@@ -452,7 +460,7 @@ class MainActivity : Activity() {
             "OWNER_LIKELY" -> Triple("ALLOW", "Yes, this looks like you", ACCENT)
             "NOT_OWNER_LIKELY" -> Triple("BLOCK", "This does not look like you", DANGER)
             "LEARNING" -> Triple("STEP_UP", "Still learning you", WARN)
-            else -> Triple("STEP_UP", "Not enough to go on", WARN)
+            else -> Triple("STEP_UP", "Please type it again", WARN)
         }
         verifyResult.removeAllViews()
         verifyResult.background = rounded(CARD, 18, tone)
@@ -478,7 +486,7 @@ class MainActivity : Activity() {
             homeModel.text = d.identityText
             homeModel.setTextColor(identityColor(d))
         }
-        FortGuard.newSession()   // the next check measures fresh behaviour
+        verifyRestart()   // the next check measures fresh behaviour
     }
 
     private fun showVerifyNote(message: String, color: Int) {

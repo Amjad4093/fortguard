@@ -25,7 +25,8 @@ from .attestation import (
 )
 from . import admin, backoffice, hardening
 from .hardening import client_ip
-from .baseline import Baselines
+from .baseline import Baselines, profile_key
+from .rhythm import Rhythms
 from .devices import ACTIVE, DeviceRegistry
 from .schema import ID_RE, ValidationFailure, validate_enroll, validate_evaluate, validate_feedback, validate_telemetry
 from .scoring import degraded_decision, score_session
@@ -118,6 +119,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
     app.fortguard_backoffice = bo
     baselines = Baselines(bo)
     app.fortguard_baselines = baselines
+    rhythms = Rhythms(bo)
+    app.fortguard_rhythms = rhythms
     if start_jobs:
         _start_purge_job(bo, baselines)
     idempotent = OrderedDict()
@@ -292,7 +295,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
                 session.user_id = body["user_id"]
                 try:
                     result = score_session(session, body["event_type"], body.get("transaction_details"),
-                                           baselines=baselines, user_id=body["user_id"], denied=denied,
+                                           baselines=baselines, user_id=profile_key(body["user_id"], body["event_type"]), denied=denied,
                                            velocity=velocity, lists=payee_lists, custom=bo.custom)
                 except Exception:
                     if not body.get("allow_degraded"):
@@ -304,6 +307,13 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         rule_facts = result.pop("_rule_facts", None)
         result["session_id"] = body["session_id"]
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        if body["event_type"] == "LOGIN" and feats is not None and not result.get("degraded"):
+            # A sentence check: the rhythm of the typing decides, and the general models can only add doubt.
+            typed = rhythms.judge(body["user_id"], body["session_id"], session.keys, now_ms,
+                                  owner_proved=getattr(session, "owner_proved", False))
+            general_doubt = (result.get("identity") or {}).get("verdict") == "NOT_OWNER_LIKELY"
+            if typed is not None and not (general_doubt and typed["verdict"] == "OWNER_LIKELY"):
+                result["identity"] = typed
         bo.record_decision(decisions.record(body, session, result, clock(), feats, rule_facts))
         bo.velocity.record(body["user_id"], getattr(session, "device_guid", None), body["event_type"],
                            body.get("transaction_details"), body["session_id"], now_ms)
@@ -313,7 +323,7 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
         # A fingerprint or face check by the owner overrides both.
         doubted = (result.get("identity") or {}).get("verdict") == "NOT_OWNER_LIKELY"
         if feats is not None and ((result["risk_level"] == "ALLOW" and not doubted) or getattr(session, "owner_proved", False)):
-            baselines.learn(body["user_id"], body["session_id"], feats, int(clock() * 1000))
+            baselines.learn(profile_key(body["user_id"], body["event_type"]), body["session_id"], feats, int(clock() * 1000))
 
         if request_id:
             idempotent[request_id] = (result, 200)
