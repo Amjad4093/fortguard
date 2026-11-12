@@ -82,6 +82,7 @@
     RULE_FORCE_STEP_UP: "Raised to the step-up band by a hard rule.",
     REASON_BEHAVIORAL_ANOMALY_HIGH: "Behavior is far from this customer's own usual pattern.",
     REASON_ML_BEHAVIOR_ANOMALY: "The machine-learning model found this session unlike the customer's usual sessions.",
+    REASON_CONTEXT_MODEL_HIGH_RISK: "The contextual model rates this payment like past confirmed frauds.",
     REASON_NOT_ACCOUNT_HOLDER: "The behaviour does not look like the account holder's, so a payment or account change needs a fingerprint or face check.",
     REASON_LOCATION_JUMP_DETECTED: "The phone was in two places too far apart, too fast.",
     REASON_DEBUGGER_ATTACHED: "A debugger is attached to the app.",

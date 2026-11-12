@@ -43,6 +43,8 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 button.primary:hover { filter: brightness(1.06); background: var(--accent); }
 button.danger { color: var(--block); border-color: var(--block); background: transparent; }
 button.danger:hover { background: var(--block-bg); }
+.card h3 { font-size: .95rem; font-weight: 600; margin: 22px 0 6px; }
+.card ul.pagesub { padding-left: 18px; max-width: 80ch; }
 button:disabled { opacity: .5; cursor: default; }
 button:focus-visible, a:focus-visible, nav a:focus-visible, tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a { color: var(--accent); }
@@ -302,6 +304,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     <a href="#/devices" data-page="devices">Devices</a>
     <a href="#/rules" data-page="rules">Rules</a>
     <a href="#/custom" data-page="custom">Bank rules <span class="count hidden" id="nav-pending"></span></a>
+    <a href="#/models" data-page="models">Risk model</a>
     <a href="#/deny" data-page="deny">Lists</a>
     <a href="#/consent" data-page="consent">Consent wording</a>
     <a href="#/collection" data-page="collection">Data collection</a>
@@ -329,6 +332,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     device_revoke: "revoked device", rules_update: "changed rules", user_create: "created user", user_update: "updated user", dev_simulate: "ran sample scenarios",
     feedback: "bank feedback", purge: "retention purge", customer_erase: "erased customer data",
     deny_add: "added to a list", deny_remove: "removed from a list", rule_create: "wrote a bank rule", rule_update: "changed a shadow rule",
+    model_train: "trained a risk model", model_request: "asked to make a model the champion", model_approve: "made a model the champion", model_reject: "rejected a model", model_retire: "retired a model",
     rule_request: "asked for a rule change", rule_approve: "approved a rule change", rule_reject: "rejected a rule change",
     rule_retire: "retired a bank rule", rule_restore: "restored a bank rule",
     consent_publish: "published consent wording", config_update: "changed data collection" };
@@ -433,7 +437,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var v = $("view"); v.innerHTML = "";
     var pages = { dashboard: dashboard, cases: parts[1] ? function (x) { return caseDetail(x, parts[1]); } : cases, decisions: decisions,
       customers: parts[1] ? function (x) { return customerDetail(x, decodeURIComponent(parts[1])); } : customers,
-      devices: devices, rules: rules, custom: customRules, deny: denyList, consent: consentPage, collection: collectionPage, users: users, audit: audit };
+      devices: devices, rules: rules, custom: customRules, models: modelsPage, deny: denyList, consent: consentPage, collection: collectionPage, users: users, audit: audit };
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
@@ -477,6 +481,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     "Lists": "Deny list: blocked outright. Suspected mules: payee accounts that step up alone and block with another signal. Trusted payees: accounts never treated as a new payee.",
     "Consent wording": "The words customers see before the app measures how they use it. Publishing new wording raises its version, and each customer's record shows which version they accepted.",
     "Data collection": "Which kinds of data the app may collect. Each switch is a kill switch: the app obeys it only when the server's signature checks out, and the server drops that kind of data too.",
+    "Risk model": "One model for all customers, trained on outcomes you have confirmed. A new model runs as the challenger: it gives its opinion on every decision and changes nothing. Making it the champion needs a second admin.",
     "Bank rules": "Your own rules, on top of the built-in ones. A new rule runs in shadow first: it is recorded but changes nothing. Going live needs a second admin.",
     "Users": "Who can sign in to this back office, and what each role may do.",
     "Audit log": "A record of every change and sign-in. Entries cannot be edited."
@@ -1275,6 +1280,89 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       el("p", { class: "msg", text: p.note + " Nothing is saved until you press Save changes." })
     ]));
     box.appendChild(el("div", { style: "height:14px" }));
+  }
+
+  // --- risk model: train, challenger in shadow, champion with a second admin -------------------------------
+  async function modelsPage(v) {
+    head(v, "Risk model");
+    var data = await call("GET", "/v1/bo/models");
+    var rd = data.readiness, c = rd.counts, genuine = c.GENUINE + c.ASSUMED_GENUINE;
+    function act(path, done) {
+      return async function (e) {
+        e.target.disabled = true;
+        try { await call("POST", path); route(); say(done); } catch (x) { say(x.message, true); e.target.disabled = false; }
+      };
+    }
+    var train = can("admin") ? el("button", { type: "button", class: "primary", text: "Train a new challenger", onclick: act("/v1/bo/models/train", "Trained. The new model is now the challenger and changes nothing yet.") }) : null;
+    if (train && !rd.ready) train.disabled = true;
+    v.appendChild(card("Outcomes to learn from", [
+      meterRow("Confirmed frauds", c.FRAUD / rd.need_fraud, c.FRAUD + " of the " + rd.need_fraud + " needed"),
+      meterRow("Genuine decisions", genuine / rd.need_genuine, genuine + " of the " + rd.need_genuine + " needed (" + c.GENUINE + " confirmed, " + c.ASSUMED_GENUINE + " allowed with no fraud report)"),
+      el("p", { class: "pagesub", text: rd.ready
+        ? "There are enough outcomes to train. Training uses the newest decisions and takes a few seconds."
+        : "No model can be trained yet. Outcomes come from cases closed as confirmed fraud or false positive, and from the bank's feedback API. Until then the rules and the per-customer models decide alone." }),
+      train]));
+
+    function pct(x) { return x == null ? "–" : Math.round(x * 100) + "%"; }
+    function caught(r) { return r ? r.fraud_caught + " of " + r.fraud : "–"; }
+    function wrong(r) { return r ? r.genuine_flagged + " of " + r.genuine : "–"; }
+    function table(headings, rows) {
+      return el("div", { class: "scroll" }, [el("table", {}, [el("thead", {}, [el("tr", {}, headings.map(function (h) { return el("th", { text: h }); }))]),
+        el("tbody", {}, rows.map(function (r) { return el("tr", {}, r.map(function (x) { return el("td", { text: String(x) }); })); }))])]);
+    }
+    function modelCard(m) {
+      var k = m.card, val = k.validation, t = k.trained_on;
+      var buttons = [];
+      if (can("admin")) {
+        if (m.status === "CHALLENGER" && !m.requested_by) buttons.push(el("button", { type: "button", text: "Ask to make it the champion", onclick: act("/v1/bo/models/" + m.id + "/request", "Asked. A different admin must approve.") }));
+        if (m.requested_by) {
+          buttons.push(el("button", { type: "button", class: "primary", text: "Approve as champion", onclick: act("/v1/bo/models/" + m.id + "/approve", "Approved. This model is now the champion.") }));
+          buttons.push(el("button", { type: "button", text: "Reject", onclick: act("/v1/bo/models/" + m.id + "/reject", "Rejected. The model stays the challenger.") }));
+        }
+        buttons.push(el("button", { type: "button", class: "danger", text: "Retire now", onclick: act("/v1/bo/models/" + m.id + "/retire", "Retired. It no longer scores decisions.") }));
+      }
+      var role = m.status === "CHAMPION"
+        ? "Champion: when it rates a payment or account change as high risk it adds " + data.points + " points."
+        : "Challenger: its opinion is recorded with every decision and changes nothing.";
+      return card((m.status === "CHAMPION" ? "Champion · " : "Challenger · ") + m.version, [
+        el("p", { class: "pagesub", text: role + (m.requested_by ? " " + m.requested_by + " has asked to make it the champion; a different admin must approve." : "") }),
+        kvList([["Trained", when(m.created_ms) + " by " + m.created_by],
+          ["Approved", m.approved_by ? when(m.approved_ms) + " by " + m.approved_by : null],
+          ["Method", k.algorithm], ["Inputs", k.inputs + " facts about the decision. Never typed text."],
+          ["Trained on", k.rows + " decisions: " + t.FRAUD + " confirmed fraud, " + t.GENUINE + " confirmed genuine, " + t.ASSUMED_GENUINE + " allowed with no fraud report"],
+          ["Flags above", pct(m.threshold) + " probability"]]),
+        el("h3", { text: "Test before use" }),
+        el("p", { class: "pagesub", text: val.method + "." }),
+        table(["", "Ranking quality (AUC)", "Frauds caught", "Genuine flagged"], [
+          ["This model", val.auc == null ? "–" : val.auc.toFixed(2), caught(val.at_threshold), wrong(val.at_threshold)],
+          ["Rules, at the step-up line", val.rules_auc == null ? "–" : val.rules_auc.toFixed(2), caught(val.rules_at_step_up), wrong(val.rules_at_step_up)]]),
+        el("h3", { text: "What it relies on most" }),
+        el("div", {}, k.top_inputs.map(function (i) { return meterRow(i.about, i.share, i.name); })),
+        el("h3", { text: "Limits" }),
+        el("ul", { class: "pagesub" }, k.limits.map(function (x) { return el("li", { text: x }); })),
+        buttons.length ? el("div", { class: "toolbar", style: "margin-top:14px" }, buttons) : null]);
+    }
+    var live = data.models.filter(function (m) { return m.status !== "RETIRED"; });
+    live.sort(function (a, b) { return (a.status === "CHAMPION" ? 0 : 1) - (b.status === "CHAMPION" ? 0 : 1); });
+    live.forEach(function (m) { v.appendChild(modelCard(m)); });
+
+    var cmp = data.comparison;
+    if (cmp) {
+      var rows = ["champion", "challenger"].filter(function (s) { return cmp.models[s]; }).map(function (s) {
+        var m = cmp.models[s];
+        return [(s === "champion" ? "Champion " : "Challenger ") + m.version, m.scored, m.scored ? m.fraud : "–", m.scored ? caught(m) : "–", m.scored ? wrong(m) : "–",
+          m.auc == null ? "–" : m.auc.toFixed(2), m.rules_auc == null ? "–" : m.rules_auc.toFixed(2)];
+      });
+      v.appendChild(card("Side by side on live decisions", [
+        el("p", { class: "pagesub", text: "Decisions with an outcome made since " + when(cmp.since_ms) + ", each scored by the model at the time. These are decisions neither model trained on." }),
+        table(["Model", "Decisions scored", "Confirmed frauds", "Frauds caught", "Genuine flagged", "Model AUC", "Rules AUC"], rows)]));
+    }
+    var past = data.models.filter(function (m) { return m.status === "RETIRED"; });
+    if (past.length) v.appendChild(card("Retired models", [table(["Version", "Trained", "By", "Trained on", "AUC in testing", "Retired", "By"], past.map(function (m) {
+      return [m.version, when(m.created_ms), m.created_by, m.card.rows + " decisions, " + m.card.trained_on.FRAUD + " frauds",
+        m.card.validation.auc == null ? "–" : m.card.validation.auc.toFixed(2), m.retired_ms ? when(m.retired_ms) : "–", m.retired_by || "–"];
+    }))]));
+    if (!data.models.length) v.appendChild(el("div", { class: "empty", text: "No model has been trained on this server." }));
   }
 
   // --- users ---------------------------------------------------------------------------------------------------

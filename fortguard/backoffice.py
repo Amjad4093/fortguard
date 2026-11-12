@@ -195,6 +195,8 @@ class BackOffice:
         self.custom = customrules.CustomRules(self)
         from .remote import Remote
         self.remote = Remote(self)
+        from .riskmodel import RiskModels
+        self.risk = RiskModels(self)
 
     def now_ms(self):
         return int(self.clock() * 1000)
@@ -826,6 +828,37 @@ def register(app, *, bo, api_key, registry, dev_mode):
             rule, pending = custom.reject(rule_id, user["username"])
             return rule_change("rule_reject", rule, {"requested_by": pending["requested_by"]})
         return rule_change("rule_" + action, custom.retire(rule_id, user["username"], retired=action == "retire"))
+
+    # the contextual risk model (riskmodel.py): train, run in shadow, promote with a second admin, retire
+    risk = bo.risk
+
+    def models_payload():
+        return {"models": risk.all(), "readiness": risk.readiness(), "comparison": risk.comparison(),
+                "points": config.WEIGHTS["REASON_CONTEXT_MODEL_HIGH_RISK"]}
+
+    @app.get("/v1/bo/models")
+    def bo_models():
+        need("viewer")
+        return jsonify(models_payload())
+
+    @app.post("/v1/bo/models/train")
+    def bo_model_train():
+        user = need("admin")
+        model = risk.train(user["username"])
+        bo.audit(user["username"], "model_train", "model:" + model["version"],
+                 {"trained_on": model["card"]["trained_on"], "auc": model["card"]["validation"]["auc"], "threshold": model["threshold"]})
+        return jsonify(models_payload()), 201
+
+    @app.post("/v1/bo/models/<int:model_id>/<action>")
+    def bo_model_action(model_id, action):
+        if action not in ("request", "approve", "reject", "retire"):
+            raise ValidationFailure(404, "not_found", "no such endpoint")
+        user = need("admin")
+        before = risk.get(model_id)
+        model = getattr(risk, action)(model_id, user["username"])
+        bo.audit(user["username"], "model_" + action, "model:" + model["version"],
+                 {"status_before": before["status"], "status_after": model["status"], "requested_by": before["requested_by"]})
+        return jsonify(models_payload())
 
     # consent wording and the signed configuration the SDK obeys (remote.py)
     @app.get("/v1/bo/consent")

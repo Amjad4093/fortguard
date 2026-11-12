@@ -103,7 +103,7 @@ def _behavioral_reasons(feats, payment):
 
 
 def score_session(session, event_type, tx, baselines=None, user_id=None, denied=(), velocity=None,
-                  lists=(), custom=None):
+                  lists=(), custom=None, risk=None, now_ms=0):
     """Score one request.
 
     denied    deny-list kinds that matched (customer, device, account, ip)
@@ -197,6 +197,15 @@ def score_session(session, event_type, tx, baselines=None, user_id=None, denied=
     # The bank's own rules run last, on the facts and the score the built-in rules produced.
     bands = config.bands_for(event_type)
     facts = rule_facts(session, event_type, tx, feats, velocity, lists, baseline, ml, in_call, score)
+    # The contextual model's opinion. The challenger is only recorded; the champion may add points on a
+    # payment or account change, and never on its own decision moves an ALLOW past the step-up line.
+    context = risk.assess(facts, now_ms) if risk is not None else None
+    if context and sensitive and context.get("champion", {}).get("flagged"):
+        points = min(config.WEIGHTS["REASON_CONTEXT_MODEL_HIGH_RISK"], config.SCORE_MAX - score)
+        reasons.append("REASON_CONTEXT_MODEL_HIGH_RISK")
+        breakdown.append({"reason": "REASON_CONTEXT_MODEL_HIGH_RISK", "points": points})
+        score += points
+        facts["score"] = float(score)
     shadow_hits = []
     if custom is not None:
         live, shadow = custom.hits(facts, event_type)
@@ -239,6 +248,7 @@ def score_session(session, event_type, tx, baselines=None, user_id=None, denied=
         "payee_lists": sorted(lists),
         "velocity": velocity,
         "shadow_rules": shadow_hits,
+        "context_model": context,
         "_features": feats,
         "_rule_facts": facts,
     }

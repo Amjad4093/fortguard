@@ -122,6 +122,7 @@ class DecisionLog:
             "payee_lists": result.get("payee_lists") or [],
             "velocity": result.get("velocity"),
             "shadow_rules": result.get("shadow_rules") or [],
+            "context_model": result.get("context_model"),
             # What the bank's own rules could read for this decision, kept so a draft rule can be tried on history.
             "rule_facts": rule_facts,
             # Numbers only: the behavioural measurements behind this decision, for the back office.

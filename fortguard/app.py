@@ -296,7 +296,8 @@ def create_app(api_key=None, clock=time.time, store=None, registry=None, verifie
                 try:
                     result = score_session(session, body["event_type"], body.get("transaction_details"),
                                            baselines=baselines, user_id=profile_key(body["user_id"], body["event_type"]), denied=denied,
-                                           velocity=velocity, lists=payee_lists, custom=bo.custom)
+                                           velocity=velocity, lists=payee_lists, custom=bo.custom,
+                                           risk=bo.risk, now_ms=now_ms)
                 except Exception:
                     if not body.get("allow_degraded"):
                         raise

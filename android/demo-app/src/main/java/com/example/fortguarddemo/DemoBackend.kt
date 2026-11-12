@@ -98,6 +98,7 @@ object DemoBackend {
         "REASON_SIM_SWAP_PATTERN" to "SIM changed and money is going to a new payee: the usual shape of a SIM-swap takeover.",
         "REASON_ON_DENY_LIST" to "The customer, device, payee account or network address is on the bank's deny list.",
         "REASON_ML_BEHAVIOR_ANOMALY" to "The learning model found this session unlike your usual ones.",
+        "REASON_CONTEXT_MODEL_HIGH_RISK" to "The risk model rates this payment like past confirmed frauds.",
         "REASON_NOT_ACCOUNT_HOLDER" to "This does not look like the account holder, so the payment needs a fingerprint or face check.",
         "REASON_VPN_OR_PROXY" to "A VPN or proxy is active.",
         "REASON_ACTIVE_CALL_DURING_PAYMENT" to "A call is active during the payment.",

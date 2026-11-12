@@ -153,6 +153,12 @@ challenges 30 per client IP, telemetry 240 per device, evaluate 6000 per API key
 Samples are in `samples/`: an enrollment request, a signed telemetry payload, an evaluate request and
 the response, for a genuine session and a coached-scam session. They are reproducible and checked in CI.
 
+### Contextual risk model
+
+A third model, shared by all customers, learns from confirmed fraud and genuine outcomes: gradient-boosted
+trees with a champion and a challenger, a second-admin approval and a model card. It exists only after
+an admin trains it on at least 20 confirmed frauds. See [docs/MODELS.md](docs/MODELS.md).
+
 ## Device trust
 
 - **Signing.** ES256 (ECDSA, P-256, SHA-256), DER signatures, over a domain-separated canonical JSON of

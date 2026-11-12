@@ -74,6 +74,9 @@ WEIGHTS = {
     # The machine-learning model finds the session unlike this customer's own past sessions
     # (fortguard/mlmodel.py). On its own it does not reach the step-up band; with the rule above it does.
     "REASON_ML_BEHAVIOR_ANOMALY": 300,
+    # The contextual model (riskmodel.py) rates this decision like past confirmed frauds. Only the
+    # champion model can add this. On its own it stays in ALLOW; with one more signal it steps up.
+    "REASON_CONTEXT_MODEL_HIGH_RISK": 250,
     # Added on a payment, payee or profile change when either model says the user is not the account
     # holder. It forces at least a step-up, so one model's doubt is enough to ask for a fingerprint.
     "REASON_NOT_ACCOUNT_HOLDER": 100,
@@ -203,3 +206,18 @@ ALLOWED_APP_IDS = ("com.example.mobilebank",)  # replace with the pilot app's pa
 PLATFORMS = ("Android", "iOS", "Web")  # "Web" is the browser test client only
 
 MODEL_VERSION = "rules-0.4.0+baseline-1+ml-1"
+
+
+# --- Contextual risk model (riskmodel.py): gradient-boosted trees trained on confirmed outcomes ----------
+RISK_MODEL_MIN_FRAUD = 20       # confirmed frauds needed before a model may be trained
+RISK_MODEL_MIN_GENUINE = 50     # genuine decisions needed (confirmed, or allowed with no fraud report)
+RISK_MODEL_MAX_ROWS = 5000      # newest decisions used for one training
+RISK_MODEL_ROUNDS = 60          # trees
+RISK_MODEL_DEPTH = 3
+RISK_MODEL_RATE = 0.1           # learning rate
+RISK_MODEL_L2 = 1.0
+RISK_MODEL_MIN_LEAF = 5         # decisions in the smallest group a tree may make
+RISK_MODEL_BINS = 16            # split points tried per input
+RISK_MODEL_FOLDS = 5
+RISK_MODEL_TARGET_FPR = 0.01    # flag above the score about 1 genuine decision in 100 reaches
+RISK_MODEL_CACHE_S = 5.0        # how often the decision path re-reads which models are active
