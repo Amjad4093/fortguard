@@ -161,8 +161,9 @@ class SessionStore:
         for name in STICKY_FACTS:
             if name in env:
                 session.env[name] = bool(session.env.get(name, False) or env[name])
-        for name in LATEST_FACTS + ("charging", "network_type", "locale", "timezone", "device_model",
-                                    "security_patch", "carrier", "call_direction") + tuple(schema.ENV_EXTRA_NUMBERS):
+        for name in (LATEST_FACTS + ("charging", "network_type", "locale", "timezone", "device_model",
+                                     "security_patch", "carrier", "call_direction", "sensors_present")
+                     + tuple(schema.ENV_EXTRA_NUMBERS)):
             if name in env:
                 session.env[name] = env[name]
 

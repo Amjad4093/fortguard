@@ -53,7 +53,7 @@ LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}([_\-][A-Za-z0-9]{2,8})?$")
 TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+\-/]{1,64}$")
 ENV_ALLOWED = (set(ENV_BOOLS) | {"os", "os_version", "device_model", "charging", "network_type", "locale", "timezone", "location",
                                  "security_patch", "carrier", "call_direction"}
-               | set(ENV_EXTRA_NUMBERS))
+               | set(ENV_EXTRA_NUMBERS) | {"sensors_present"})
 
 TOUCH_TYPES = {"DOWN", "MOVE", "UP"}
 KEY_TYPES = {"DOWN", "UP"}
@@ -184,6 +184,12 @@ def validate_telemetry(p):
                 _fail("invalid_request", f"environment.{name} must be a whole number")
             if not low <= value <= high:
                 _fail("invalid_request", f"environment.{name} is out of range")
+    if "sensors_present" in env:  # optional: which sensors the phone has
+        present = env["sensors_present"]
+        if (not isinstance(present, list) or len(present) > len(config.SENSOR_NAMES)
+                or any(not isinstance(n, str) or n not in config.SENSOR_NAMES for n in present)
+                or len(set(present)) != len(present)):
+            _fail("invalid_request", "environment.sensors_present must list known sensor names once each")
     if "location" in env:  # optional, only when the customer shared their approximate location
         loc = env["location"]
         if not isinstance(loc, dict) or set(loc) - {"lat", "lng", "accuracy_m", "fix_age_s"}:

@@ -107,7 +107,7 @@ object FortGuard {
         timer?.cancel(false)
         // Scheduled before the engine is built, so a saved configuration that changes the interval replaces this one.
         flushEveryMs = config.flushIntervalMs
-        timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
+        timer = worker.scheduleWithFixedDelay({ runCatching { motion?.repeatQuietSensors(); engine?.flush() } }, config.flushIntervalMs, config.flushIntervalMs, TimeUnit.MILLISECONDS)
         worker.execute {
             try {
                 val key = AndroidKeys.loadOrCreate() // may take a moment on StrongBox phones
@@ -207,7 +207,9 @@ object FortGuard {
     }
 
     private fun environmentSnapshot(checks: EnvironmentChecks): Map<String, Any?> {
-        val base = checks.snapshot()
+        val base = LinkedHashMap(checks.snapshot())
+        // Which sensors this phone has, so the back office can tell "not on this phone" from "sent nothing".
+        motion?.available()?.let { base["sensors_present"] = it }
         return if (config?.allowDebugOverrides == true && debugOverrides.isNotEmpty()) {
             LinkedHashMap(base).apply { debugOverrides.forEach { (k, v) -> if (containsKey(k)) put(k, v) } }
         } else base
@@ -267,7 +269,7 @@ object FortGuard {
         if (policy.version > 0 && policy.flushIntervalMs != flushEveryMs) {
             flushEveryMs = policy.flushIntervalMs
             timer?.cancel(false)
-            timer = worker.scheduleWithFixedDelay({ runCatching { engine?.flush() } }, flushEveryMs, flushEveryMs, TimeUnit.MILLISECONDS)
+            timer = worker.scheduleWithFixedDelay({ runCatching { motion?.repeatQuietSensors(); engine?.flush() } }, flushEveryMs, flushEveryMs, TimeUnit.MILLISECONDS)
         }
     }
 
@@ -321,6 +323,7 @@ object FortGuard {
     /** Send what is buffered now, in the background. */
     fun flush(callback: ((FortGuardEngine.Outcome) -> Unit)? = null) {
         worker.execute {
+            runCatching { motion?.repeatQuietSensors() }
             val o = engine?.flush(force = true) ?: FortGuardEngine.Outcome(false, "SDK not ready: $lastMessage")
             lastMessage = o.message
             callback?.let { cb -> main.post { cb(o) } }

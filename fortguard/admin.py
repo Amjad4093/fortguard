@@ -30,7 +30,7 @@ WEB_DIR = pathlib.Path(__file__).parent / "web"
 MAX_DECISIONS = 500
 GRID_COLS, GRID_ROWS = 8, 14  # touch heatmap resolution, stored as counts per cell
 # Device facts the portal may show. Locale, timezone and anything free-form are deliberately left out.
-ENV_SHOWN = (tuple(ENV_BOOLS) + ("os", "os_version", "device_model", "network_type", "charging", "security_patch",
+ENV_SHOWN = (tuple(ENV_BOOLS) + ("os", "os_version", "device_model", "network_type", "charging", "security_patch", "sensors_present",
                                   "carrier", "call_direction") + tuple(ENV_EXTRA_NUMBERS))
 # Signal keys recorded in "captured": touch, keys, ui, the two base sensors, and every extra sensor.
 SIGNAL_KEYS = ("touch", "keys", "ui", "accelerometer", "gyroscope") + tuple(config.EXTRA_SENSORS)

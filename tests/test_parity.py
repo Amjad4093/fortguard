@@ -308,3 +308,16 @@ def test_the_identity_verdict_is_kept_with_the_decision(api, admin, make_session
     run_session(api, make_session("genuine", 140))
     shown = admin.call("get", "/v1/bo/decisions")[1]["decisions"][0]
     assert shown["identity"]["verdict"] == "LEARNING" and "0 of 10" in shown["identity"]["text"]
+
+
+def test_the_phone_says_which_sensors_it_has(api, admin, make_session):
+    s = with_env(make_session("genuine", 150), sensors_present=["accelerometer", "gyroscope", "light", "proximity"])
+    assert run_session(api, s)[0] == 200
+    env = admin.call("get", "/v1/bo/decisions")[1]["decisions"][0]["environment"]
+    assert env["sensors_present"] == ["accelerometer", "gyroscope", "light", "proximity"]
+
+
+@pytest.mark.parametrize("bad", [["thermometer"], "light", ["light", "light"], [1]])
+def test_a_bad_sensor_list_is_refused(api, make_session, bad):
+    with pytest.raises(RuntimeError, match="telemetry rejected: 400"):
+        run_session(api, with_env(make_session("genuine", 151), sensors_present=bad))

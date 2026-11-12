@@ -149,6 +149,8 @@ private val SCALAR_SENSOR_TYPES = setOf(Sensor.TYPE_LIGHT, Sensor.TYPE_PROXIMITY
 internal class MotionCapture(context: Context, private val buffer: EventBuffer) : SensorEventListener {
     private val sensors = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val lastSent = HashMap<Int, Long>()
+    /** The latest reading of each extra sensor, so a quiet one can be repeated. See [repeatQuietSensors]. */
+    private val latest = HashMap<Int, DoubleArray>()
     @Volatile var running = false
         private set
     val hasAccelerometer get() = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
@@ -189,14 +191,29 @@ internal class MotionCapture(context: Context, private val buffer: EventBuffer) 
             Sensor.TYPE_GYROSCOPE -> buffer.gyro(e.values[0].toDouble(), e.values[1].toDouble(), e.values[2].toDouble(), ts)
             else -> {
                 val name = EXTRA_SENSOR_NAMES[type] ?: return
-                if (type in SCALAR_SENSOR_TYPES) {
-                    buffer.sensor(name, e.values[0].toDouble(), 0.0, 0.0, ts)
-                } else {
-                    val y = if (e.values.size > 1) e.values[1].toDouble() else 0.0
-                    val z = if (e.values.size > 2) e.values[2].toDouble() else 0.0
-                    buffer.sensor(name, e.values[0].toDouble(), y, z, ts)
-                }
+                val x = e.values[0].toDouble()
+                val y = if (type !in SCALAR_SENSOR_TYPES && e.values.size > 1) e.values[1].toDouble() else 0.0
+                val z = if (type !in SCALAR_SENSOR_TYPES && e.values.size > 2) e.values[2].toDouble() else 0.0
+                synchronized(latest) { latest[type] = doubleArrayOf(x, y, z) }
+                buffer.sensor(name, x, y, z, ts)
             }
+        }
+    }
+
+    /**
+     * Light, proximity and on many phones air pressure report only when their reading changes. In a still
+     * room they can stay silent for minutes, so a session would show no samples for a sensor the phone
+     * has. Before each batch this repeats the latest reading of any sensor that has been quiet for
+     * [QUIET_MS], stamped with the current time: the value is still true, it simply has not changed.
+     */
+    fun repeatQuietSensors(now: Long = System.currentTimeMillis()) {
+        if (!running) return
+        val readings = synchronized(latest) { latest.mapValues { it.value.copyOf() } }
+        for ((type, v) in readings) {
+            val name = EXTRA_SENSOR_NAMES[type] ?: continue
+            if (now - (lastSent[type] ?: 0L) < QUIET_MS) continue
+            lastSent[type] = now
+            buffer.sensor(name, v[0], v[1], v[2], now)
         }
     }
 
@@ -206,6 +223,7 @@ internal class MotionCapture(context: Context, private val buffer: EventBuffer) 
         const val PERIOD_US = 20_000
         const val MIN_GAP_MS = 18L
         // Slower sensors (light, proximity, pressure) report on change; this keeps any one from flooding.
+        const val QUIET_MS = 2_000L
         const val MIN_GAP_EXTRA_MS = 200L   // 5 a second: these sensors are summarised, not analysed sample by sample
     }
 }
