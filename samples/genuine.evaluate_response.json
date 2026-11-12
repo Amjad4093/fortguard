@@ -8,6 +8,7 @@
     "sessions": 0,
     "status": "NONE"
   },
+  "context_model": null,
   "degraded": false,
   "deny_list": [],
   "identity": {
