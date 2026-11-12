@@ -1090,7 +1090,13 @@ def register_dev(app, *, bo, api_key, clock, dev_mode):
         seed0 = int(clock() * 1000) % 1_000_000
         results = []
         for i, name in enumerate(SCENARIOS):
-            status, body = run_session(transport, build_session(name, int(clock() * 1000), seed0 + i), now_ms=int(clock() * 1000))
+            try:
+                status, body = run_session(transport, build_session(name, int(clock() * 1000), seed0 + i), now_ms=int(clock() * 1000))
+            except RuntimeError:  # the enrolment rate limit, after several runs in a row
+                if results:
+                    bo.audit(user["username"], "dev_simulate", "scenarios", {"count": len(results)})
+                raise ValidationFailure(429, "rate_limited", "Sample scenarios were run several times in a row. "
+                                        f"{len(results)} sessions were added this time. Wait a minute and try again.")
             results.append({"scenario": name, "risk_level": body.get("risk_level"), "risk_score": body.get("risk_score")})
         bo.audit(user["username"], "dev_simulate", "scenarios", {"count": len(results)})
         return jsonify({"results": results})

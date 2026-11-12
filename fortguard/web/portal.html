@@ -155,6 +155,10 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .hist { font-size: .875rem; padding: 8px 0; border-top: 1px solid var(--rule); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
 .toolbar input[type="search"] { min-width: 260px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); font-size: .86rem; color: var(--muted); }
+.pager .info { margin-right: auto; }
+.pager button { min-height: 32px; padding: 0 12px; border-radius: 8px; font-size: .84rem; }
+.pager select { min-height: 32px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { min-height: 32px; padding: 0 12px; border-radius: 999px; font-size: .84rem; }
 .chips button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
@@ -433,6 +437,36 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     (pages[page] || dashboard)(v).catch(function (e) { say(e.message, true); });
     window.scrollTo(0, 0);
   }
+  // --- pagination: any table longer than one page gets Previous / Next under it ----------------------
+  var PAGE_SIZE = 25;
+  function paginate(table) {
+    if (table.dataset.paged || !table.tBodies.length) return;
+    var rows = Array.prototype.slice.call(table.tBodies[0].rows);
+    if (rows.length <= 10) return;
+    table.dataset.paged = "1";
+    var size = PAGE_SIZE, page = 0;
+    var info = el("span", { class: "info" });
+    var prev = el("button", { type: "button", text: "Previous", onclick: function () { page--; show(); } });
+    var next = el("button", { type: "button", text: "Next", onclick: function () { page++; show(); } });
+    var pick = el("select", { "aria-label": "Rows per page" }, [10, 25, 50, 100].map(function (n) { return el("option", { value: String(n), text: n + " per page" }); }));
+    pick.value = String(size);
+    pick.addEventListener("change", function () { size = Number(pick.value); page = 0; show(); });
+    function show() {
+      var pages = Math.max(1, Math.ceil(rows.length / size));
+      page = Math.max(0, Math.min(page, pages - 1));
+      rows.forEach(function (r, i) { r.style.display = i >= page * size && i < (page + 1) * size ? "" : "none"; });
+      var last = Math.min(rows.length, (page + 1) * size);
+      info.textContent = "Rows " + (page * size + 1) + "–" + last + " of " + rows.length.toLocaleString() + " · page " + (page + 1) + " of " + pages;
+      prev.disabled = page === 0; next.disabled = page >= pages - 1;
+    }
+    var pager = el("div", { class: "pager" }, [info, pick, prev, next]);
+    table.parentNode.insertBefore(pager, table.nextSibling);
+    show();
+  }
+  new MutationObserver(function () {
+    document.querySelectorAll("#view table").forEach(paginate);
+  }).observe(document.getElementById("view"), { childList: true, subtree: true });
+
   var PAGE_SUB = {
     "Dashboard": "What is happening across all sessions in the last 24 hours.",
     "Cases": "Sessions that need a person to look at them. Open a case to see the evidence.",
@@ -610,7 +644,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   }
   async function simulate(e) {
     e.target.disabled = true; say("Running sample scenarios…");
-    try { var r = await call("POST", "/v1/bo/dev/simulate"); say("Added " + r.results.length + " synthetic sessions."); route(); refreshCount(); }
+    try { var r = await call("POST", "/v1/bo/dev/simulate"); route(); refreshCount(); say("Added " + r.results.length + " made-up test sessions. Nothing was removed: your earlier sessions are still listed under Decisions and Customers."); }
     catch (x) { say(x.message, true); } finally { e.target.disabled = false; }
   }
 
@@ -622,7 +656,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
     var search = el("input", { type: "search", placeholder: "Search session, user or device", value: caseFilter.q, "aria-label": "Search cases" });
     search.addEventListener("change", function () { caseFilter.q = search.value; route(); });
     v.appendChild(el("div", { class: "toolbar" }, [chips, search]));
-    var q = "/v1/bo/cases?limit=300" + (caseFilter.status ? "&status=" + caseFilter.status : "") + (caseFilter.q ? "&q=" + encodeURIComponent(caseFilter.q) : "");
+    var q = "/v1/bo/cases?limit=1000" + (caseFilter.status ? "&status=" + caseFilter.status : "") + (caseFilter.q ? "&q=" + encodeURIComponent(caseFilter.q) : "");
     var data = await call("GET", q);
     [["", "All"]].concat(STATUSES.map(function (s) { return [s, STATUS_TEXT[s]]; })).forEach(function (p) {
       var n = p[0] ? data.counts[p[0]] : STATUSES.reduce(function (a, s) { return a + data.counts[s]; }, 0);
@@ -1021,7 +1055,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
       chips.appendChild(el("button", { type: "button", "aria-pressed": String(decisionLevel === p[0]), text: p[1], onclick: function () { decisionLevel = p[0]; route(); } }));
     });
     v.appendChild(el("div", { class: "toolbar" }, [chips]));
-    var data = await call("GET", "/v1/bo/decisions?limit=300" + (decisionLevel ? "&level=" + decisionLevel : ""));
+    var data = await call("GET", "/v1/bo/decisions?limit=1000" + (decisionLevel ? "&level=" + decisionLevel : ""));
     var counts = { ALLOW: 0, STEP_UP: 0, BLOCK: 0 };
     data.decisions.forEach(function (d) { counts[d.risk_level] = (counts[d.risk_level] || 0) + 1; });
     v.appendChild(el("div", { class: "tiles" }, [tile(data.decisions.length, "Shown"), tile(counts.ALLOW, "Allowed"),
@@ -1363,7 +1397,7 @@ th { text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
   // --- audit -------------------------------------------------------------------------------------------------------
   async function audit(v) {
     head(v, "Audit log");
-    var data = await call("GET", "/v1/bo/audit?limit=500");
+    var data = await call("GET", "/v1/bo/audit?limit=1000");
     var rows = data.audit.map(function (a) {
       return el("tr", {}, [el("td", { text: when(a.time_ms) }), el("td", { text: a.actor }), el("td", { text: ACTION_TEXT[a.action] || a.action }), el("td", { text: a.target || "–" }),
         el("td", { style: "white-space:normal;min-width:240px" }, [a.detail ? el("code", { text: JSON.stringify(a.detail) }) : "–"])]);
